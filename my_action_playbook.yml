@@ -1,0 +1,8 @@
+---
+- name: My remediation playbook
+  hosts: localhost
+  connection: local
+  tasks:
+    - name: Print a message
+      ansible.builtin.debug:
+        msg: "Event received! Running automated action."
