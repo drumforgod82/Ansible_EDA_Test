@@ -1,20 +1,37 @@
+# ---
+# - name: Hello Events
+#   hosts: all
+#   sources:
+#     - name: watch for range events
+#       ansible.eda.range:
+#         # This is a simple built-in event source for demonstration purposes
+#         limit: 5
+
+#   # Define the rules to match against incoming events
+#   rules:
+#     - name: Say Hello on event 1
+#       condition:
+#         # The condition checks on event payload. The 'range' source sends events with an 'i' key
+#         event.i == 1
+#       action:
+#         # The action to run when the condition is true
+#         run_playbook:
+#           name: my_action_playbook.yml
+#           inventory: localhost
+
 ---
-- name: Hello Events
+- name: ServiceNow Event Processing
   hosts: all
   sources:
-    - name: watch for range events
-      ansible.eda.range:
+    - ansible.eda.range:
         # This is a simple built-in event source for demonstration purposes
         limit: 5
-
-  # Define the rules to match against incoming events
+        
   rules:
     - name: Say Hello on event 1
-      condition:
-        # The condition checks on event payload. The 'range' source sends events with an 'i' key
-        event.i == 1
+      # The condition checks on event payload. The 'range' source sends events with an 'i' key
+      condition: event.i == 1
+      # The action to run when the condition is true
       action:
-        # The action to run when the condition is true
-        run_playbook:
-          name: my_action_playbook.yml
-          inventory: localhost
+        debug:
+          msg: "Hello! Event {{ event.i }} received"
