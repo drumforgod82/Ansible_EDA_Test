@@ -1,5 +1,6 @@
 ---
 - name: Hello Events
+  hosts: all
   sources:
     - name: watch for range events
       ansible.eda.range:
