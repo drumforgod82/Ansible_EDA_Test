@@ -1,6 +1,6 @@
 ---
 - name: My remediation playbook
-  hosts: localhost
+  hosts: all
   connection: local
   tasks:
     - name: Print a message
