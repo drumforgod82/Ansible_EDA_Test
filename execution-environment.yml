@@ -1,0 +1,25 @@
+---
+version: 3
+
+images:
+  base_image:
+    name: registry.redhat.io/ansible-automation-platform-26/de-minimal-rhel9:latest
+
+dependencies:
+  galaxy:
+    collections:
+      - servicenow.itsm
+      - servicenow.servicenow
+      - ansible.eda  # Event-Driven Ansible collection
+  
+  python:
+    - servicenow-itsm>=2.0.0
+    - aiohttp
+    - requests
+  
+  system: |
+    git-core [platform:rpm]
+
+additional_build_steps:
+  append_final:
+    - RUN pip3 install --upgrade pip
