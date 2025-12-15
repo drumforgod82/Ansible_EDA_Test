@@ -17,3 +17,4 @@
         # The action to run when the condition is true
         run_playbook:
           name: my_action_playbook.yml
+          inventory: localhost
