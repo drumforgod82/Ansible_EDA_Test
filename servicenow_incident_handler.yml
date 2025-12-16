@@ -1,5 +1,5 @@
 ---
-- name: Handle ServiceNow Incident
+- name: ServiceNow Incident Remediation
   hosts: localhost
   connection: local
   gather_facts: false
@@ -8,14 +8,51 @@
     - name: Display incident information
       debug:
         msg: |
-          Processing ServiceNow Incident:
-          Number: {{ incident_number | default('N/A') }}
-          Description: {{ short_description | default('N/A') }}
-          Priority: {{ priority | default('N/A') }}
-          CI: {{ cmdb_ci | default('N/A') }}
-          Sys ID: {{ sys_id | default('N/A') }}
+          ========================================
+          ServiceNow Incident Automation Triggered
+          ========================================
+          Incident Number: {{ incident_number }}
+          Description: {{ short_description }}
+          Priority: {{ priority }}
+          CI: {{ cmdb_ci }}
+          State: {{ state }}
+          Assigned To: {{ assigned_to }}
+          ========================================
     
-    - name: Run remediation based on incident type
+    - name: Determine remediation action based on incident
+      set_fact:
+        remediation_type: "{{ 'disk_cleanup' if 'disk' in short_description|lower else 'generic' }}"
+    
+    - name: Execute disk cleanup remediation
       debug:
-        msg: "This is where your remediation automation would run"
-      # Add your actual remediation tasks here
+        msg: "Running disk cleanup on {{ cmdb_ci }}"
+      when: remediation_type == 'disk_cleanup'
+      # Add actual remediation tasks here
+    
+    - name: Execute generic remediation
+      debug:
+        msg: "Running generic diagnostics on {{ cmdb_ci }}"
+      when: remediation_type == 'generic'
+      # Add actual remediation tasks here
+    
+    - name: Update ServiceNow incident with results
+      uri:
+        url: "https://dev341769.service-now.com/api/now/table/incident/{{ sys_id }}"
+        method: PATCH
+        headers:
+          Content-Type: "application/json"
+        user: "{{ SN_USERNAME }}"
+        password: "{{ SN_PASSWORD }}"
+        force_basic_auth: true
+        body_format: json
+        body:
+          work_notes: "Ansible automation completed at {{ ansible_date_time.iso8601 }}"
+        validate_certs: false
+        status_code: 200
+      when: sys_id is defined
+      register: servicenow_update
+
+    - name: Log ServiceNow update result
+      debug:
+        msg: "ServiceNow incident {{ incident_number }} updated successfully"
+      when: servicenow_update is succeeded
