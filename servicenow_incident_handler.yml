@@ -4,11 +4,11 @@
   connection: local
   gather_facts: false
   vars:
-    sn_host: "dev341769"
+    sn_instance: "https://dev341769.service-now.com"
   
   tasks:
     - name: Display incident information
-      debug:
+      ansible.builtin.debug:
         msg: |
           ========================================
           ServiceNow Incident Automation Triggered
@@ -24,24 +24,24 @@
           ========================================
     
     - name: Determine remediation action based on incident
-      set_fact:
+      ansible.builtin.set_fact:
         remediation_type: "{{ 'disk_cleanup' if 'disk' in short_description|lower else 'generic' }}"
     
     - name: Execute disk cleanup remediation
-      debug:
+      ansible.builtin.debug:
         msg: "Running disk cleanup on {{ cmdb_ci }}"
       when: remediation_type == 'disk_cleanup'
       # Add actual remediation tasks here
     
     - name: Execute generic remediation
-      debug:
+      ansible.builtin.debug:
         msg: "Running generic diagnostics on {{ cmdb_ci }}"
       when: remediation_type == 'generic'
       # Add actual remediation tasks here
     
     - name: Update ServiceNow incident with results
-      uri:
-        url: "https://{{ sn_host }}.service-now.com/api/now/table/incident/{{ sys_id }}"
+      ansible.builtin.uri:
+        url: "{{ sn_instance }}/api/now/table/incident/{{ sys_id }}"
         method: PATCH
         headers:
           Content-Type: "application/json"
@@ -57,6 +57,22 @@
       register: servicenow_update
 
     - name: Log ServiceNow update result
-      debug:
+      ansible.builtin.debug:
         msg: "ServiceNow incident {{ incident_number }} updated successfully"
       when: servicenow_update is succeeded
+
+    - name: Close Complete the incident
+      servicenow.itsm.incident:
+        instance:
+          host: "{{ sn_instance }}"
+          username: "{{ SN_USERNAME }}"
+          password: "{{ SN_PASSWORD }}"
+        sys_id: "{{ sys_id }}"
+        state: 7 # Closed
+        close_code: "Workaround provided"
+        close_notes: test
+      register: incident_closure
+
+    - name: Print Incident closure info
+      ansible.builtin.debug:
+        var: incident_closure
