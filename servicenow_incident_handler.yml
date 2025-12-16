@@ -3,6 +3,8 @@
   hosts: localhost
   connection: local
   gather_facts: false
+  vars:
+    sn_host: "dev341769"
   
   tasks:
     - name: Display incident information
@@ -39,7 +41,7 @@
     
     - name: Update ServiceNow incident with results
       uri:
-        url: "https://dev341769.service-now.com/api/now/table/incident/{{ sys_id }}"
+        url: "https://{{ sn_host }}.service-now.com/api/now/table/incident/{{ sys_id }}"
         method: PATCH
         headers:
           Content-Type: "application/json"
