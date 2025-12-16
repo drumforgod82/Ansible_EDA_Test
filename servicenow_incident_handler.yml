@@ -9,19 +9,19 @@
   tasks:
     - name: Display incident information
       ansible.builtin.debug:
-        msg: |
-          ========================================
-          ServiceNow Incident Automation Triggered
-          ========================================
-          Incident Number: {{ incident_number }} \n
-          Description: {{ short_description }} \n
-          Priority: {{ priority }} \n
-          CI: {{ cmdb_ci }} \n
-          State: {{ state }} \n
-          Assigned To: {{ assigned_to }} \n
-          Category: {{ category }} \n
-          sys_id: {{ sys_id }} \n
-          ========================================
+        msg:
+          - "========================================"
+          - "ServiceNow Incident Automation Triggered"
+          - "========================================"
+          - "Incident Number: {{ incident_number }}"
+          - "Description: {{ short_description }}"
+          - "Priority: {{ priority }}"
+          - "CI: {{ cmdb_ci }}"
+          - "State: {{ state }}"
+          - "Assigned To: {{ assigned_to }}"
+          - "Category: {{ category }}"
+          - "sys_id: {{ sys_id }}"
+          - "========================================"
     
     - name: Determine remediation action based on incident
       ansible.builtin.set_fact:
@@ -75,4 +75,8 @@
 
     - name: Print Incident closure info
       ansible.builtin.debug:
-        var: incident_closure
+        msg: 
+          - "======== Incident Closure Information ==========="
+          - "Incident Number: {{ incident_closure.record.number }}"
+          - "Incident State: {{ incident_closure.record.state }}"
+          - "Incident URL: {{ sn_instance }}/incident.do?sys_id={{ incident_closure.record.sys_id }}"
