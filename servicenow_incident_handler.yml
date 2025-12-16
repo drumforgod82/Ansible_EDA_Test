@@ -1,0 +1,21 @@
+---
+- name: Handle ServiceNow Incident
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  
+  tasks:
+    - name: Display incident information
+      debug:
+        msg: |
+          Processing ServiceNow Incident:
+          Number: {{ incident_number | default('N/A') }}
+          Description: {{ short_description | default('N/A') }}
+          Priority: {{ priority | default('N/A') }}
+          CI: {{ cmdb_ci | default('N/A') }}
+          Sys ID: {{ sys_id | default('N/A') }}
+    
+    - name: Run remediation based on incident type
+      debug:
+        msg: "This is where your remediation automation would run"
+      # Add your actual remediation tasks here
