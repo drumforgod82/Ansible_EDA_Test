@@ -17,6 +17,7 @@
           CI: {{ cmdb_ci }}
           State: {{ state }}
           Assigned To: {{ assigned_to }}
+          Category: {{ category }}
           ========================================
     
     - name: Determine remediation action based on incident
@@ -46,7 +47,7 @@
         force_basic_auth: true
         body_format: json
         body:
-          work_notes: "Ansible automation completed at {{ ansible_date_time.iso8601 }}"
+          work_notes: "Ansible automation completed at {{ now(utc=true).isoformat() }}"
         validate_certs: false
         status_code: 200
       when: sys_id is defined
