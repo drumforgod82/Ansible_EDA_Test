@@ -6,7 +6,7 @@
   vars:
     sn_instance: "https://dev341769.service-now.com"
     # These custom mappings will be different for certain versions of ServiceNow.  Look at your ServiceNow instance for these Choice lists
-    custom_indident_state_mapping:
+    custom_incident_state_mapping:
       # ServiceNow table: sys_choice.  Query for the incident state choices: element=state^name=incident
       # URL example: https://<Your_instance>.service-now.com/sys_choice_list.do?sysparm_query=element%3Dstate%5Ename%3Dincident&sysparm_view=
       state:
@@ -91,9 +91,10 @@
           username: "{{ SN_USERNAME }}"
           password: "{{ SN_PASSWORD }}"
         sys_id: "{{ sys_id }}"
-        incident_mapping: "{{ custom_indident_state_mapping }}"
-        state: 7 # Closed
-        close_code: solution_provided
+        incident_mapping: "{{ custom_incident_state_mapping }}"
+        # The next three lines uses the incident mapping from the variables, make sure to use the display values
+        state: "Closed"
+        close_code: "Solution Provided"
         close_notes: "Closed"
       register: incident_closure
 
