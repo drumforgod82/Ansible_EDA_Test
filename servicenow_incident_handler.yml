@@ -10,12 +10,18 @@
       # ServiceNow table: sys_choice.  Query for the incident state choices: element=state^name=incident
       # URL example: https://<Your_instance>.service-now.com/sys_choice_list.do?sysparm_query=element%3Dstate%5Ename%3Dincident&sysparm_view=
       state:
-        1: "New"
-        2: "In Progress"
-        3: "On Hold"
-        6: "Resolved"
-        7: "Closed"
-        8: "Cancelled"
+        1: new
+        2: in_progress
+        3: on_hold
+        6: resolved
+        7: closed
+        8: cancelled
+        new: new
+        in_progress: in_progress
+        on_hold: on_hold
+        resolved: resolved
+        closed: closed
+        cancelled: cancelled
       # ServiceNow table: sys_choice.  Query for the incident close_code choices: element=close_code^name=incident
       # URL example: https://<Your_instance>.service-now.com/sys_choice_list.do?sysparm_query=element%3Dclose_code%5Ename%3Dincident&sysparm_view=
       close_code:
@@ -28,8 +34,10 @@
         "No resolution provided": "No resolution provided"
         "Resolved by request": "Resolved by request"
         "Resolved by caller": "Resolved by caller"
-        "Solution provided": "Solution provided" # What's stored in DB
-        "Solution Provided": "Solution Provided" # What the API returns
+        "Solution provided": "Solution provided"
+        "Solution Provided": "Solution Provided" # handle case variance
+        # Add empty string mapping for initial state
+        "":""
 
   tasks:
     - name: Display incident information
@@ -93,9 +101,9 @@
           username: "{{ SN_USERNAME }}"
           password: "{{ SN_PASSWORD }}"
         sys_id: "{{ sys_id }}"
-        # incident_mapping: "{{ custom_incident_state_mapping }}"
+        incident_mapping: "{{ custom_incident_state_mapping }}"
         state: closed
-        close_code: solution_provided
+        close_code: "Solution provided" # Use EXACT string from ServiceNow choices
         close_notes: "Closed"
       register: incident_closure
 
