@@ -10,18 +10,27 @@
       # ServiceNow table: sys_choice.  Query for the incident state choices: element=state^name=incident
       # URL example: https://<Your_instance>.service-now.com/sys_choice_list.do?sysparm_query=element%3Dstate%5Ename%3Dincident&sysparm_view=
       state:
-        1: new
-        2: in_progress
-        3: on_hold
-        6: resolved
-        7: closed
-        8: cancelled
-        new: new
-        in_progress: in_progress
-        on_hold: on_hold
-        resolved: resolved
-        closed: closed
-        cancelled: cancelled
+        # For SENDING to ServiceNow (display name -> number)
+        "New": 1
+        "In Progress": 2  
+        "On Hold": 3
+        "Resolved": 6
+        "Closed": 7
+        "Canceled": 8
+        # For RECEIVING from ServiceNow (number -> display name)  
+        1: "New"
+        2: "In Progress"
+        3: "On Hold"
+        6: "Resolved"
+        7: "Closed"
+        8: "Canceled"
+        # Also handle lowercase variants ServiceNow might return
+        "new": 1
+        "in_progress": 2
+        "on_hold": 3
+        "resolved": 6
+        "closed": 7
+        "canceled": 8
       # ServiceNow table: sys_choice.  Query for the incident close_code choices: element=close_code^name=incident
       # URL example: https://<Your_instance>.service-now.com/sys_choice_list.do?sysparm_query=element%3Dclose_code%5Ename%3Dincident&sysparm_view=
       close_code:
@@ -102,7 +111,7 @@
           password: "{{ SN_PASSWORD }}"
         sys_id: "{{ sys_id }}"
         incident_mapping: "{{ custom_incident_state_mapping }}"
-        state: closed
+        state: "Closed" # Maps to number 7 on the incident mappings
         close_code: "Solution provided" # Use EXACT string from ServiceNow choices
         close_notes: "Closed"
       register: incident_closure
