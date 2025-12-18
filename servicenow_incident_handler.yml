@@ -93,10 +93,9 @@
           username: "{{ SN_USERNAME }}"
           password: "{{ SN_PASSWORD }}"
         sys_id: "{{ sys_id }}"
-        incident_mapping: "{{ custom_incident_state_mapping }}"
-        # The next three lines uses the incident mapping from the variables, make sure to use the display values
-        state: "Closed"
-        close_code: "Solution Provided"
+        # incident_mapping: "{{ custom_incident_state_mapping }}"
+        state: closed
+        close_code: solution_provided
         close_notes: "Closed"
       register: incident_closure
 
