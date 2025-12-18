@@ -28,7 +28,8 @@
         "No resolution provided": "No resolution provided"
         "Resolved by request": "Resolved by request"
         "Resolved by caller": "Resolved by caller"
-        "Solution provided": "Solution provided"
+        "Solution provided": "Solution provided" # What's stored in DB
+        "Solution Provided": "Solution Provided" # What the API returns
 
   tasks:
     - name: Display incident information
