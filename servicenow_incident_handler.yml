@@ -69,8 +69,8 @@
           password: "{{ SN_PASSWORD }}"
         sys_id: "{{ sys_id }}"
         state: 7 # Closed
-        close_code: "Workaround provided"
-        close_notes: test
+        close_code: "Solved (Permanently)"
+        close_notes: "Closed"
       register: incident_closure
 
     - name: Print Incident closure info
