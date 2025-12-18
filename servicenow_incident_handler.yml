@@ -37,7 +37,7 @@
         "Solution provided": "Solution provided"
         "Solution Provided": "Solution Provided" # handle case variance
         # Add empty string mapping for initial state
-        "":""
+        "": ""
 
   tasks:
     - name: Display incident information
