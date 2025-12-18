@@ -5,7 +5,30 @@
   gather_facts: false
   vars:
     sn_instance: "https://dev341769.service-now.com"
-  
+    # These custom mappings will be different for certain versions of ServiceNow.  Look at your ServiceNow instance for these Choice lists
+    custom_indident_state_mapping:
+      # ServiceNow table: sys_choice.  Query for the incident state choices: element=state^name=incident
+      # URL example: https://<Your_instance>.service-now.com/sys_choice_list.do?sysparm_query=element%3Dstate%5Ename%3Dincident&sysparm_view=
+      state:
+        1: "New"
+        2: "In Progress"
+        3: "On Hold"
+        6: "Resolved"
+        7: "Closed"
+        8: "Cancelled"
+      # ServiceNow table: sys_choice.  Query for the incident close_code choices: element=close_code^name=incident
+      # URL example: https://<Your_instance>.service-now.com/sys_choice_list.do?sysparm_query=element%3Dclose_code%5Ename%3Dincident&sysparm_view=
+      close_code:
+        workaround_Provided: "Workaround provided"
+        duplicate: "Duplicate"
+        resolved_by_change: "Resolved by change"
+        user_error: "User error"
+        known_error: "Known error"
+        resolved_by_problem: "Resolved by problem"
+        no_resolution_provided: "No resolution provided"
+        resolved_by_caller: "Resolved by caller"
+        solution_provided: "Solution provided"
+
   tasks:
     - name: Display incident information
       ansible.builtin.debug:
@@ -68,8 +91,9 @@
           username: "{{ SN_USERNAME }}"
           password: "{{ SN_PASSWORD }}"
         sys_id: "{{ sys_id }}"
+        incident_mapping: "{{ custom_indident_state_mapping }}"
         state: 7 # Closed
-        close_code: "Solved (Permanently)"
+        close_code: solution_provided
         close_notes: "Closed"
       register: incident_closure
 
