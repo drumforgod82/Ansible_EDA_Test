@@ -105,4 +105,5 @@
           - "======== Incident Closure Information ==========="
           - "Incident Number: {{ incident_closure.record.number }}"
           - "Incident State: {{ incident_closure.record.state }}"
+          - "Incident Close Code: {{ incident_closure.record.close_code }}
           - "Incident URL: {{ sn_instance }}/incident.do?sys_id={{ incident_closure.record.sys_id }}"
