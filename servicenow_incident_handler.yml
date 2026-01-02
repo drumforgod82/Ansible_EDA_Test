@@ -4,7 +4,7 @@
   connection: local
   gather_facts: false
   vars:
-    sn_instance: "https://dev341769.service-now.com"
+    sn_instance: "https://dev266152.service-now.com"
     # These custom mappings will be different for certain versions of ServiceNow.  Look at your ServiceNow instance for these Choice lists
     custom_incident_state_mapping:
       # ServiceNow table: sys_choice.  Query for the incident state choices: element=state^name=incident
