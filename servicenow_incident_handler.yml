@@ -92,7 +92,8 @@
         force_basic_auth: true
         body_format: json
         body:
-         work_notes: "Ansible Automation completed at {{ lookup('pipe', 'TZ=America/Chicago date "+%Y-%m-%d %H:%M:%S %Z"') }}"
+         work_notes: >-
+           Ansible Automation completed at {{ lookup('pipe', 'TZ=America/Chicago date "+%Y-%m-%d %H:%M:%S %Z"') }}
         validate_certs: false
         status_code: 200
       when: sys_id is defined
