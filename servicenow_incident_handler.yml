@@ -92,7 +92,8 @@
         force_basic_auth: true
         body_format: json
         body:
-          work_notes: "Ansible automation completed at {{ now(utc=true).isoformat() }}"
+         # work_notes: "Ansible automation completed at {{ now(utc=true).isoformat() }}"
+         work_notes: "Ansible Automation completed at {{ now(utc=true) | strftime('%Y-%m-%d %H:%M:%S %Z', tz='America/Chicago') }}"
         validate_certs: false
         status_code: 200
       when: sys_id is defined
