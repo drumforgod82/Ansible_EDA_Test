@@ -7,17 +7,34 @@
         port: 5000
         
   rules:
-    - name: Log All Incoming Incidents
+    - name: Run incident handler on new incidents
       condition: event.payload.event_type == "incident_created"
       action:
-        debug:
-          msg: |
-            New Incident from ServiceNow:
-            Number: {{ event.payload.incident_number }}
-            Description: {{ event.payload.short_description }}
-            Priority: {{ event.payload.priority }}
-            CI: {{ event.payload.cmdb_ci }}
-            Sys ID: {{ event.payload.sys_id }}
+        run_job_template:
+          name: "ServiceNow Incident Handler"
+          organization: "Default"
+          job_args:
+            extra_vars:
+              incident_number: "{{ event.payload.incident_number }}"
+              short_description: "{{ event.payload.short_description }}"
+              priority: "{{ event.payload.priority }}"
+              cmdb_ci: "{{ event.payload.cmdb_ci }}"
+              state: "{{ event.payload.state }}"
+              assigned_to: "{{ event.payload.assigned_to }}"
+              category: "{{ event.payload.category }}"
+              sys_id: "{{ event.payload.sys_id }}"
+
+    # - name: Log All Incoming Incidents
+    #   condition: event.payload.event_type == "incident_created"
+    #   action:
+    #     debug:
+    #       msg: |
+    #         New Incident from ServiceNow:
+    #         Number: {{ event.payload.incident_number }}
+    #         Description: {{ event.payload.short_description }}
+    #         Priority: {{ event.payload.priority }}
+    #         CI: {{ event.payload.cmdb_ci }}
+    #         Sys ID: {{ event.payload.sys_id }}
 
 # ---
 # - name: ServiceNow Event Processing
