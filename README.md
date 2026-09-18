@@ -365,13 +365,10 @@ The playbook runs `hosts: localhost` with `connection: local`, so the inventory 
 > your credential already injects `SN_HOST`, consider changing it to
 > `sn_instance: "{{ SN_HOST }}"` so the playbook follows the credential instead of an edit.
 
-![Job template settings](docs/images/13-controller-job-template.png)
+![Job template settings, with Prompt on launch ticked next to Extra variables](docs/images/13-controller-job-template.png)
 
-_Job template settings_
-
-![Variables → Prompt on launch enabled (required)](docs/images/14-controller-prompt-on-launch.png)
-
-_Variables → Prompt on launch enabled (required)_
+_Job template settings. Note the **Prompt on launch** checkbox beside Extra variables — that
+is the one that must be ticked._
 
 
 ---
@@ -448,13 +445,9 @@ Wait for **Completed**. Then check **Automation Decisions → Rulebooks** — yo
 in pending state"*, see [`aap-eda-project-sync-fix.md`](aap-eda-project-sync-fix.md). That is
 almost always an out-of-memory worker pod, not a problem with your project settings.
 
-![EDA project synced, state Completed](docs/images/24-eda-project.png)
+![EDA project settings](docs/images/24-eda-project.png)
 
-_EDA project synced, state Completed_
-
-![Rulebooks discovered after a successful sync](docs/images/25-eda-rulebooks.png)
-
-_Rulebooks discovered after a successful sync_
+_EDA project settings. **Source control credential can be left empty for a public repo.**_
 
 
 ### 2.4 Generate the event stream token
@@ -565,17 +558,15 @@ The activation should reach **Running**, and its log should end with:
 ansible_rulebook.rule_set_runner - INFO - Waiting for events, ruleset: ServiceNow Incident Automation - Simple Test
 ```
 
-![Activation page 1 — details](docs/images/29-activation-details.png)
+![Rulebook activation form, showing the Event streams field mapped to the event stream](docs/images/25-eda-rulebooks.png)
 
-_Activation page 1 — details_
-
-![Activation page 2 — mapping ansible.eda.webhook onto the event stream](docs/images/30-activation-event-stream-mapping.png)
-
-_Activation page 2 — mapping ansible.eda.webhook onto the event stream_
+_The activation form. Note **Event streams** already contains `ServiceNow Event Stream` — the
+gear icon beside it is where you map it onto the rulebook's `ansible.eda.webhook` source._
 
 ![Activation in Running state](docs/images/31-activation-running.png)
 
-_Activation in Running state_
+_Activation details once it is running: `Running | Container running activation`, with the
+rulebook, event stream, credential, decision environment and project git hash all shown._
 
 
 ---
@@ -676,7 +667,29 @@ _Result script step output variables_
 _Action outputs mapped from step pills_
 
 
-#### Step 1 — Script step: build the payload
+The action has three steps plus error evaluation. Names used here match the working
+implementation:
+
+| # | Step | Type |
+|---|---|---|
+| 1 | Build EDA Payload | Script |
+| 2 | POST to Ansible EDA | REST |
+| 3 | Process Response | Script |
+
+#### Step 1 — Script step: "Build EDA Payload"
+
+**Input variables** — one row:
+
+| Name | Value |
+|---|---|
+| `Incident_record` | drag `Action → Incident Record` from the Data panel on the right |
+
+Set **If this step fails** to *Stop the action and go to error evaluation*.
+
+![Script step input variables and script body](docs/images/50.1-sn-script-step-inputs.png)
+
+_Step 1 input variables. The name here is `Incident_record` with a capital I — which is why
+the script reads both spellings._
 
 **Output variables** (these must be **declared**, or `outputs.x` silently evaporates):
 
@@ -787,7 +800,7 @@ _Action outputs mapped from step pills_
 })(inputs, outputs);
 ```
 
-#### Step 2 — REST step: post to the event stream
+#### Step 2 — REST step: "POST to Ansible EDA"
 
 | Field | Value |
 |---|---|
@@ -799,7 +812,7 @@ _Action outputs mapped from step pills_
 
 The `Authorization` header comes from the alias — do not add it by hand.
 
-#### Step 3 — Script step: interpret the result
+#### Step 3 — Script step: "Process Response"
 
 ```javascript
 (function execute(inputs, outputs) {
@@ -856,21 +869,22 @@ Add a condition so you don't fire on every incident. Either works:
 - `Caller` is `Event Management` (useful with Event Management demo data)
 - `Priority` is one of `1 - Critical`, `2 - High`
 
-**Actions:**
+**Actions** — the working flow has five steps plus an error handler:
 
-1. **Action:** your published `Send Event to Ansible AAP` action
-   - **Input:** drag `Trigger → Incident Record` into `Incident Record`
-2. **Flow Logic → If:** drag the action's `Success` pill, condition `is true`
-3. **Then → Update Record**
-   - Record: `Trigger → Incident Record`, Table: Incident
-   - Work notes: `Ansible automation triggered successfully. HTTP status: <HTTP Status pill>`
-   - State: `In Progress`
-4. **Log** (Level: Info): `AAP automation triggered for incident <Incident Record pill>`
-5. **Flow Logic → End Flow** directly under the Then branch
-6. **Else branch → Update Record**
-   - Work notes: `Failed to trigger Ansible automation. Error: <Error Message pill>. HTTP status: <HTTP Status pill>`
-7. **Log** (Level: Error): `AAP automation failed for incident <Incident Record pill>. Error: <Error Message pill>`
-8. Add an **Error Handler** on the flow
+| # | Step | Detail |
+|---|---|---|
+| 1 | **Action:** `Send Incident to Ansible EDA` | Input: drag `Trigger → Incident Record` into `Incident Record` |
+| 2 | **Flow Logic → If** `Successful` | Drag the action's `Success` pill, condition `is true` |
+| 3 | **then → Update Incident Record** | Record: `Trigger → Incident Record`, Table: Incident. Work notes: success message with the `HTTP Status` pill. State: `In Progress` |
+| 4 | **Flow Logic → End Flow** | Sits inside the `then` branch, so a success run stops here |
+| 5 | **Update Incident Record** | Reached only when the If was false. Work notes: failure message with the `Error Message` and `HTTP Status` pills |
+| 6 | **Error Handler → Update Incident Record** | Runs on an unexpected flow error. Work notes: a generic "contact the automation team" message |
+
+There is no explicit `Else`. Step 4's **End Flow** inside the `then` branch is what makes
+step 5 behave as the failure path — a successful run never reaches it.
+
+Optional: add **Log** steps (Info on success, Error on failure) if you want the outcome in
+the system log as well as the work notes.
 
 **Save → Activate.**
 
@@ -898,13 +912,9 @@ _Log step, Info level_
 
 _Else branch — update record and log the error_
 
-![Flow error handler](docs/images/66-sn-flow-error-handler.png)
+![Full flow with the error handler expanded](docs/images/66-sn-flow-error-handler.png)
 
-_Flow error handler_
-
-![Full flow overview](docs/images/67-sn-flow-overview.png)
-
-_Full flow overview_
+_The complete flow, with the Error Handler expanded at the bottom._
 
 
 ---
@@ -1009,14 +1019,6 @@ Create an incident in ServiceNow matching your trigger, then check in order:
 3. **Activation log:** should show `run_job_template` and `Job Launched, url: /api/controller/v2/jobs/<n>/`
 4. **Controller:** the job appears, with `extra_vars` populated and an `ansible_eda` block
    recording the ruleset, rule, and event uuid.
-
-![Event stream Events tab showing the received JSON](docs/images/70-eda-event-stream-events.png)
-
-_Event stream Events tab showing the received JSON_
-
-![Controller job launched by the rulebook, with extra vars](docs/images/71-controller-job-from-eda.png)
-
-_Controller job launched by the rulebook, with extra vars_
 
 
 ### Reading the activation counters
@@ -1153,6 +1155,15 @@ change.
 ---
 
 ## Appendix A — OAuth 2.0 direct job launch (alternative)
+
+> ⚠️ **Not used by the EDA flow above.** The working integration in this repo authenticates to
+> AAP with a bearer token on the event stream (Part 3.1), and the rulebook launches the job
+> template. Nothing in Parts 1–5 needs OAuth 2.0, a REST Message, or a job template ID.
+>
+> This appendix is kept for two reasons: it is a legitimate alternative if you ever want
+> ServiceNow to launch a job template directly without EDA, and the OAuth application setup in
+> A.1 is a useful reference. **If you are following this guide for the first time, skip to
+> [Appendix B](#appendix-b--legacy-business-rule-do-not-use) or stop here.**
 
 Use this if you want ServiceNow to call a job template **directly**, with no EDA. Payloads
 here **must** be wrapped in `extra_vars`.
@@ -1325,10 +1336,6 @@ Authorization Code grant type*
 Then create a Connection & Credential Alias, choose **Create New Connection & Credential**
 from it, fill in the prompts, and click **Create and Get OAuth Token**.
 
-![Integration Hub configuration template](docs/images/82-sn-configuration-template.png)
-
-_Integration Hub configuration template_
-
 ![Connection & Credential Alias for Ansible](docs/images/83-sn-ansible-alias.png)
 
 _Connection & Credential Alias for Ansible_
@@ -1339,6 +1346,10 @@ _Create New Connection & Credential → Create and Get OAuth Token_
 
 
 ### A.3 Create the REST Message
+
+> **Superseded.** The EDA flow does not use a REST Message at all — the Action's REST *step*
+> posts to the event stream using the Connection & Credential Alias from Part 3.1. This
+> section applies only to the direct-launch pattern.
 
 All → System Web Services → Outbound → REST Message → New
 
@@ -1351,10 +1362,6 @@ All → System Web Services → Outbound → REST Message → New
 
 HTTP method **POST**, endpoint copied from parent, header
 `Content-Type: application/json`.
-
-![REST Message with OAuth 2.0 authentication](docs/images/85-sn-rest-message.png)
-
-_REST Message with OAuth 2.0 authentication_
 
 
 ### A.4 Action script (Pattern B)
