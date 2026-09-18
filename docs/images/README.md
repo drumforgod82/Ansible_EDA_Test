@@ -40,7 +40,7 @@ Tick them off as you capture them:
 - [ ] `67-sn-flow-overview.png` — Full flow overview
 - [ ] `70-eda-event-stream-events.png` — Event stream Events tab showing the received JSON
 - [ ] `71-controller-job-from-eda.png` — Controller job launched by the rulebook, with extra vars
-- [ ] `80-aap-oauth-application.png` — OAuth application — authorization code, confidential
+- [*] `80-aap-oauth-application.png` — OAuth application — authorization code, confidential
 - [ ] `81-aap-allow-external-oauth.png` — Settings → Platform Gateway → Allow External Users to Create OAuth2 Tokens
 - [ ] `82-sn-configuration-template.png` — Integration Hub configuration template
 - [ ] `83-sn-ansible-alias.png` — Connection & Credential Alias for Ansible
