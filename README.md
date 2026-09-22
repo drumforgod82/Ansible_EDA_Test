@@ -283,13 +283,9 @@ fields:
     id: password
     label: Password
     secret: true
-  - type: string
-    id: host
-    label: ServiceNow Host URL
 required:
   - username
   - password
-  - host
 ```
 
 **Injector configuration:**
@@ -298,7 +294,6 @@ required:
 extra_vars:
   SN_USERNAME: "{{ username }}"
   SN_PASSWORD: "{{ password }}"
-  SN_HOST: "{{ host }}"
 ```
 
 ![Custom ServiceNow credential type — input and injector configuration](docs/images/10-controller-credential-type.png)
@@ -577,6 +572,8 @@ rulebook, event stream, credential, decision environment and project git hash al
 > [Part 4 — The payload contract](#part-4--the-payload-contract-read-this).** It defines the
 > exact JSON shape EDA needs. Getting it wrong is the failure mode that produces a successful
 > `200` and no automation.
+> Make sure to grant the Admin account the following roles `snc_basic_auth_api_access` and `snc_basic_auth_api_access`.
+> Otherwise, you will get 401 errors.
 
 ### 3.1 Create the Connection & Credential Alias (how the token is sent)
 
