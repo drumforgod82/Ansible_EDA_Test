@@ -24,6 +24,18 @@
               category: "{{ event.payload.category }}"
               sys_id: "{{ event.payload.sys_id }}"
 
+    - name: Run sctask handlers
+      condition: >-
+        event.payload.event_type == "sctask_created" and
+        event.payload.catalog_item == "<Enter Catalog Item name here>"
+      action:
+        run_job_template:
+          name: "<your AAP template name>"
+          organization: "Default"
+          job_args:
+            extra_vars:
+              sn_event: "{{ event.payload }}"
+
     # - name: Log All Incoming Incidents
     #   condition: event.payload.event_type == "incident_created"
     #   action:
