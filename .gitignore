@@ -1,0 +1,29 @@
+# Secrets and local variable files -- never commit these.
+# Phase 5 (aap_bootstrap.yml) introduces vars files holding event stream tokens.
+vars/*.local.yml
+vars/secrets.yml
+*.vault
+*.token
+.env
+.env.*
+!.env.example
+
+# Ansible runtime artifacts
+*.retry
+collections/ansible_collections/
+collections/*.info/
+.ansible/
+ansible.log
+
+# Python virtual environments (the local rulebook harness uses one)
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Editor and OS noise
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*~

@@ -1,0 +1,46 @@
+---
+# ############################################################################
+# TEST ARTIFACT - DELETE AFTER EXPERIMENT 4.
+#
+# This is the instrument for the cardinality experiment: attach BOTH team
+# activations to ONE event stream, run this rulebook on both, POST a single
+# event, then count how many activation logs show it.
+#
+#   2 logs = fan-out (every activation gets a copy)
+#   1 log  = queue   (each event goes to exactly one activation)
+#
+# Repeat 3-5 times. Under queue semantics the winner can alternate, so a single
+# trial could mislead. Correlate runs with the test_id key in the payload.
+#
+# Both activations run this SAME file, so the rulebook cannot tell you which
+# activation it is - the activation's own log does. Read the two logs separately
+# and count.
+#
+# It matches EVERYTHING on purpose. That is why it must never be left attached
+# to a real stream: it would fire on every event forever. Delete the file from
+# the repo once experiment 4 is recorded.
+# ############################################################################
+- name: Cardinality test - catch-all debug
+  hosts: all
+  sources:
+    - ansible.eda.webhook:
+        host: 0.0.0.0
+        port: 5000
+
+  rules:
+    - name: Log every event received
+      # A presence check is normally wrong (once two senders share a stream,
+      # presence checks cross-match) but here matching everything IS the point.
+      condition: event.payload is defined
+      action:
+        debug:
+          msg:
+            - "=== CARDINALITY TEST - EVENT RECEIVED ==="
+            - "test_id       = {{ event.payload.test_id | default('MISSING') }}"
+            - "stream        = {{ event.meta.eda_event_stream_name | default('MISSING') }}"
+            - "endpoint      = {{ event.meta.endpoint | default('MISSING') }}"
+            - "target_team   = {{ event.payload.target_team | default('MISSING') }}"
+            - "event_type    = {{ event.payload.event_type | default('MISSING') }}"
+            - "event_version = {{ event.payload.event_version | default('MISSING') }}"
+            - "source        = {{ event.payload.source | default('MISSING') }}"
+            - "========================================="

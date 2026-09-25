@@ -1,0 +1,46 @@
+---
+# Team B incident automation. Deliberately a separate file from team_a_rulebook.yml
+# rather than one parameterised rulebook: in the real world each team owns its own
+# rulebook, and the test should model that.
+#
+# The ansible.eda.webhook source below is a PLACEHOLDER. In AAP the activation's
+# event-stream source mapping replaces it at runtime with eda.builtin.pg_listener
+# (see README Part 2.6). The port is never actually bound.
+#
+# Any edit to this file changes the SHA the source mapping is pinned to, so the
+# cycle for every change is:
+#   push -> sync the EDA project -> re-attach the event stream -> restart
+- name: Team B - ServiceNow incident automation
+  hosts: all
+  sources:
+    - ansible.eda.webhook:
+        host: 0.0.0.0
+        port: 5000
+
+  rules:
+    - name: Launch Team B incident handler
+      # See team_a_rulebook.yml for why the stream name is the primary check.
+      condition: >-
+        event.meta.eda_event_stream_name == "sn-team-b" and
+        event.payload.event_type == "servicenow.incident.created"
+      action:
+        run_job_template:
+          name: "Team B Incident Handler"
+          organization: "Team B"
+          job_args:
+            extra_vars:
+              # default('') on EVERY mapping - see team_a_rulebook.yml.
+              incident_number: "{{ event.payload.incident_number | default('') }}"
+              short_description: "{{ event.payload.short_description | default('') }}"
+              priority: "{{ event.payload.priority | default('') }}"
+              cmdb_ci: "{{ event.payload.cmdb_ci | default('') }}"
+              state: "{{ event.payload.state | default('') }}"
+              assigned_to: "{{ event.payload.assigned_to | default('') }}"
+              category: "{{ event.payload.category | default('') }}"
+              sys_id: "{{ event.payload.sys_id | default('') }}"
+              # Reserved routing keys, carried through for audit and debugging.
+              event_version: "{{ event.payload.event_version | default('') }}"
+              source: "{{ event.payload.source | default('') }}"
+              target_team: "{{ event.payload.target_team | default('') }}"
+              # Which stream actually delivered this event.
+              source_stream: "{{ event.meta.eda_event_stream_name | default('') }}"

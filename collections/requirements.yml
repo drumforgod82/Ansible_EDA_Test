@@ -1,3 +1,18 @@
 ---
+# Installed automatically during project sync (both the controller project and the
+# EDA project). Versions are pinned so a sandbox rebuild reproduces the same
+# environment rather than silently picking up a new major.
+#
+# To bump: check https://galaxy.ansible.com, change the version, sync the project,
+# and confirm the activation still starts.
 collections:
+  # Used by servicenow_incident_handler.yml for the servicenow.itsm.incident module.
   - name: servicenow.itsm
+    version: 2.16.0
+
+  # ansible.eda is already baked into the de-supported-rhel9 decision environment
+  # (2.13.0 at time of writing, confirmed in the activation log). It is listed here
+  # so local runs via ~/eda-local-test resolve the same version the DE uses, and so
+  # a custom DE built later does not silently drift.
+  - name: ansible.eda
+    version: 2.13.0

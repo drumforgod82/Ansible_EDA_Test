@@ -5,7 +5,7 @@
     - ansible.eda.webhook:
         host: 0.0.0.0
         port: 5000
-        
+
   rules:
     - name: Run incident handler on new incidents
       condition: event.payload.event_type == "incident_created"
@@ -15,14 +15,19 @@
           organization: "Default"
           job_args:
             extra_vars:
-              incident_number: "{{ event.payload.incident_number }}"
-              short_description: "{{ event.payload.short_description }}"
-              priority: "{{ event.payload.priority }}"
-              cmdb_ci: "{{ event.payload.cmdb_ci }}"
-              state: "{{ event.payload.state }}"
-              assigned_to: "{{ event.payload.assigned_to }}"
-              category: "{{ event.payload.category }}"
-              sys_id: "{{ event.payload.sys_id }}"
+              # default('') on EVERY mapping. Without it, one key missing from the
+              # event (an unassigned incident has no assigned_to, for example) fails
+              # the whole action with "Object of type StrictUndefined is not JSON
+              # serializable" and launches no job at all -- the event is silently
+              # dropped, with no partial launch and no retry.
+              incident_number: "{{ event.payload.incident_number | default('') }}"
+              short_description: "{{ event.payload.short_description | default('') }}"
+              priority: "{{ event.payload.priority | default('') }}"
+              cmdb_ci: "{{ event.payload.cmdb_ci | default('') }}"
+              state: "{{ event.payload.state | default('') }}"
+              assigned_to: "{{ event.payload.assigned_to | default('') }}"
+              category: "{{ event.payload.category | default('') }}"
+              sys_id: "{{ event.payload.sys_id | default('') }}"
 
     - name: Run sctask handlers
       condition: >-
@@ -55,7 +60,7 @@
 #     - ansible.eda.range:
 #         # This is a simple built-in event source for demonstration purposes
 #         limit: 5
-        
+
 #   rules:
 #     - name: Say Hello on event 1
 #       # The condition checks on event payload. The 'range' source sends events with an 'i' key

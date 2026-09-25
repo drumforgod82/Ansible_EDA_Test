@@ -4,7 +4,17 @@
   connection: local
   gather_facts: false
   vars:
-    sn_instance: "https://dev211593.service-now.com"
+    # Injected as an extra var by the custom ServiceNow credential type. That type
+    # needs a `host` input and an `SN_HOST` injector added to it -- the original
+    # version defined username/password only, so this is a one-time credential-type
+    # edit in the UI. See README Part 1.1. Never hardcode the instance here: the
+    # same playbook is run by more than one organization.
+    sn_instance: "{{ SN_HOST }}"
+    # Closing the incident is OFF by default, deliberately. Two organizations
+    # pointed at one PDI otherwise race to close the same ticket and corrupt each
+    # other's results. Pass -e sn_close_incident=true, or set it as a job template
+    # extra var, only when the close is what you actually want to test.
+    sn_close_incident: false
     # These custom mappings will be different for certain versions of ServiceNow.  Look at your ServiceNow instance for these Choice lists
     custom_incident_state_mapping:
       # ServiceNow table: sys_choice.  Query for the incident state choices: element=state^name=incident
@@ -12,12 +22,12 @@
       state:
         # For SENDING to ServiceNow (display name -> number)
         "New": 1
-        "In Progress": 2  
+        "In Progress": 2
         "On Hold": 3
         "Resolved": 6
         "Closed": 7
         "Canceled": 8
-        # For RECEIVING from ServiceNow (number -> display name)  
+        # For RECEIVING from ServiceNow (number -> display name)
         1: "New"
         2: "In Progress"
         3: "On Hold"
@@ -49,6 +59,22 @@
         "": ""
 
   tasks:
+    # Without this, a missing SN_HOST surfaces as a raw undefined-variable error
+    # inside a uri task, which reads like a network problem rather than a
+    # credential-type problem.
+    - name: Assert the ServiceNow host was injected by the credential
+      ansible.builtin.assert:
+        that:
+          - SN_HOST is defined
+          - SN_HOST | length > 0
+        fail_msg: >-
+          SN_HOST is not set. Add a `host` input and an `SN_HOST` extra_vars
+          injector to the custom ServiceNow credential type, then re-save the
+          ServiceNow PDI credential with the instance URL (including https://).
+        success_msg: "ServiceNow host resolved from credential: {{ sn_instance }}"
+      tags:
+        - always
+
     - name: Display incident information
       ansible.builtin.debug:
         msg:
@@ -64,23 +90,23 @@
           - "Category: {{ category }}"
           - "sys_id: {{ sys_id }}"
           - "========================================"
-    
+
     - name: Determine remediation action based on incident
       ansible.builtin.set_fact:
         remediation_type: "{{ 'disk_cleanup' if 'disk' in short_description|lower else 'generic' }}"
-    
+
     - name: Execute disk cleanup remediation
       ansible.builtin.debug:
         msg: "Running disk cleanup on {{ cmdb_ci }}"
       when: remediation_type == 'disk_cleanup'
       # Add actual remediation tasks here
-    
+
     - name: Execute generic remediation
       ansible.builtin.debug:
         msg: "Running generic diagnostics on {{ cmdb_ci }}"
       when: remediation_type == 'generic'
       # Add actual remediation tasks here
-    
+
     - name: Update ServiceNow incident with results
       ansible.builtin.uri:
         url: "{{ sn_instance }}/api/now/table/incident/{{ sys_id }}"
@@ -92,17 +118,38 @@
         force_basic_auth: true
         body_format: json
         body:
-         work_notes: >-
+          work_notes: >-
            Ansible Automation completed at {{ lookup('pipe', 'TZ=America/Chicago date "+%Y-%m-%d %H:%M:%S %Z"') }}
         validate_certs: false
-        status_code: 200
-      when: sys_id is defined
+        # 404 is tolerated on purpose: it means this sys_id does not exist in the
+        # instance, which is the normal result for a synthetic smoke-test event. If
+        # 404 were fatal the play would abort here and never reach the close gate
+        # below, so you could not test the skip path at all.
+        #
+        # 401/403 are deliberately NOT tolerated. A 401 here is almost always a
+        # missing snc_basic_auth_api_access role on the account rather than a wrong
+        # password, and silently swallowing it would hide a real misconfiguration.
+        status_code:
+          - 200
+          - 404
+      when:
+        - sys_id is defined
+        - sys_id | length > 0
       register: servicenow_update
 
     - name: Log ServiceNow update result
       ansible.builtin.debug:
-        msg: "ServiceNow incident {{ incident_number }} updated successfully"
-      when: servicenow_update is succeeded
+        msg: >-
+          {% if servicenow_update is skipped -%}
+            No sys_id supplied, so no work note was written.
+          {%- elif servicenow_update.status == 404 -%}
+            sys_id {{ sys_id }} does not exist in {{ sn_instance }} (HTTP 404). No work
+            note was written. Expected for a synthetic test event; investigate if this
+            came from a real incident.
+          {%- else -%}
+            ServiceNow incident {{ incident_number | default('(unknown)') }} updated
+            successfully (HTTP {{ servicenow_update.status }}).
+          {%- endif %}
 
     - name: Close Complete the incident
       servicenow.itsm.incident:
@@ -115,13 +162,40 @@
         state: "Closed" # Maps to number 7 on the incident mappings
         close_code: "Solution provided" # Use EXACT string from ServiceNow choices
         close_notes: "Closed"
+      when:
+        - sn_close_incident | bool
+        - sys_id is defined
+        - sys_id | length > 0
+        # Do not try to close a record the PATCH above just proved does not exist.
+        - servicenow_update.status | default(0) == 200
       register: incident_closure
+
+    # Says WHICH gate stopped the close. Without this, a skipped close is invisible
+    # in the job output and looks identical to a close that silently did nothing.
+    - name: Report that the incident close was skipped
+      ansible.builtin.debug:
+        msg: >-
+          Incident {{ incident_number | default('(unknown)') }} was NOT closed --
+          {% if not (sn_close_incident | bool) -%}
+            sn_close_incident is false. Pass -e sn_close_incident=true to close it.
+          {%- elif not (sys_id is defined and sys_id | length > 0) -%}
+            no sys_id was supplied.
+          {%- else -%}
+            sys_id {{ sys_id }} was not found in {{ sn_instance }} (the work-note PATCH
+            returned {{ servicenow_update.status | default('n/a') }}).
+          {%- endif %}
+      when: incident_closure is skipped
 
     - name: Print Incident closure info
       ansible.builtin.debug:
-        msg: 
+        msg:
           - "======== Incident Closure Information ==========="
           - "Incident Number: {{ incident_closure.record.number }}"
           - "Incident State: {{ incident_closure.record.state }}"
           - "Incident Close Code: {{ incident_closure.record.close_code }}"
           - "Incident URL: {{ sn_instance }}/incident.do?sys_id={{ incident_closure.record.sys_id }}"
+      # incident_closure is a skipped result when the close is gated off, and
+      # .record does not exist on a skipped result.
+      when:
+        - incident_closure is not skipped
+        - incident_closure.record is defined

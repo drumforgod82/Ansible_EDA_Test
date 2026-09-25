@@ -24,8 +24,9 @@ click, what to type, and how to prove it worked.
 9. [Part 5 — Testing end to end](#part-5--testing-end-to-end)
 10. [Part 6 — Troubleshooting](#part-6--troubleshooting)
 11. [Part 7 — Token rotation and maintenance](#part-7--token-rotation-and-maintenance)
-12. [Appendix A — OAuth 2.0 direct job launch (alternative)](#appendix-a--oauth-20-direct-job-launch-alternative)
-13. [Appendix B — Legacy Business Rule (do not use)](#appendix-b--legacy-business-rule-do-not-use)
+12. [Part 8 — Multi-organization event stream topology](#part-8--multi-organization-event-stream-topology)
+13. [Appendix A — OAuth 2.0 direct job launch (alternative)](#appendix-a--oauth-20-direct-job-launch-alternative)
+14. [Appendix B — Legacy Business Rule (do not use)](#appendix-b--legacy-business-rule-do-not-use)
 
 ---
 
@@ -52,6 +53,27 @@ way to get stuck, so tick these off as you go.
 | 14 | Create the ServiceNow Action | [3.2](#32-create-the-action) | The REST step uses the alias (12) and the URL (10) |
 | 15 | Create the ServiceNow Flow | [3.3](#33-create-the-flow) | Calls the published Action (14) |
 | 16 | Test each hop in order | [Part 5](#part-5--testing-end-to-end) | |
+
+> **One-time vs. per-organization.** The table above reads as one straight-through sequence,
+> but only step 1 is actually one-time. Everything from step 2 on is scoped to a single
+> organization and repeats — in full — for every additional organization you onboard (see
+> Team A / Team B in Part 8). Splitting the same 16 steps by scope:
+
+| Scope | Steps | What's in it |
+|---|---|---|
+| **ONE-TIME — global** | 1 | Create the custom ServiceNow credential type. A credential *type* is a schema, not a value; every org's credential is *of* this type. |
+| **PER-ORGANIZATION — repeat for each org** | 2–16 | Controller credentials, project, job template, EDA credentials, Decision Environment, EDA project, event-stream token, Event Stream credential, Event Stream itself, Rulebook Activation, ServiceNow Connection/Credential Alias, reading the payload contract, Action, Flow, and testing. |
+
+Concretely, onboarding a second organization means going back to step 2 with that org's own
+values — its own controller credentials, its own project (even if it points at the same repo),
+its own job template, its own Decision Environment, its own EDA project sync, its own token,
+its own Event Stream credential, its own Event Stream, and its own Rulebook Activation. None of
+that is shared with the first organization's copies. Only step 1 — the credential *type* — is
+ever done once and reused.
+
+> Today this sandbox has exactly one organization ("Default"), so steps 2–16 have only been
+> walked once. The per-organization repeat above is a statement about what onboarding a second
+> org requires, not a claim that a second org exists yet.
 
 > **The two easiest mistakes to make, both of which fail silently:**
 >
@@ -261,7 +283,7 @@ instance instead:
 
 ### 1.1 Create a custom ServiceNow credential type
 
-The playbook uses `{{ SN_USERNAME }}`, `{{ SN_PASSWORD }}`, and `SN_HOST` as **Ansible
+The playbook uses `{{ SN_USERNAME }}`, `{{ SN_PASSWORD }}`, and `{{ SN_HOST }}` as **Ansible
 variables**. That means the credential must inject them as **extra vars**, not environment
 variables.
 
@@ -283,9 +305,13 @@ fields:
     id: password
     label: Password
     secret: true
+  - type: string
+    id: host
+    label: Host
 required:
   - username
   - password
+  - host
 ```
 
 **Injector configuration:**
@@ -294,7 +320,37 @@ required:
 extra_vars:
   SN_USERNAME: "{{ username }}"
   SN_PASSWORD: "{{ password }}"
+  SN_HOST: "{{ host }}"
 ```
+
+> **The `host` value must include the `https://` scheme** — e.g.
+> `https://<your-pdi>.service-now.com`, not `<your-pdi>.service-now.com`. The playbook builds
+> URLs by string concatenation (`{{ sn_instance }}/api/now/table/...`); without the scheme
+> you get a malformed URL, not a clear error.
+
+**If you already have a `ServiceNow` credential type from before this change** (username +
+password only, no `host`), editing the type definition does **not** touch credentials that
+were created under the old definition — their `host` field will be empty. You must open each
+existing ServiceNow credential (Automation Execution → Infrastructure → Credentials), fill in
+the new **Host** field with the full instance URL, and save it again. Skip this and the
+credential silently has no host even though the type now supports one.
+
+> ⚠️ **Blast radius of this change:** the playbook (`servicenow_incident_handler.yml`) now
+> asserts that `SN_HOST` is set, before it does anything else:
+> ```yaml
+> - name: Assert the ServiceNow host was injected by the credential
+>   ansible.builtin.assert:
+>     that:
+>       - SN_HOST is defined
+>       - SN_HOST | length > 0
+>     fail_msg: >-
+>       SN_HOST is not set. Add a `host` input and an `SN_HOST` extra_vars
+>       injector to the custom ServiceNow credential type, then re-save the
+>       ServiceNow PDI credential with the instance URL (including https://).
+> ```
+> That's the point of this edit: a credential that's missing `host` now fails **fast**, on the
+> first task, with the message above — instead of failing later, obscurely, inside a `uri`
+> task with a raw undefined-variable error that reads like a network problem.
 
 ![Custom ServiceNow credential type — input and injector configuration](docs/images/10-controller-credential-type.png)
 
@@ -356,9 +412,19 @@ _Automation Execution project pointing at this repo_
 The playbook runs `hosts: localhost` with `connection: local`, so the inventory only needs
 `localhost` with `ansible_connection: local`.
 
-> **Note on `servicenow_incident_handler.yml`:** it currently hardcodes `sn_instance`. Since
-> your credential already injects `SN_HOST`, consider changing it to
-> `sn_instance: "{{ SN_HOST }}"` so the playbook follows the credential instead of an edit.
+> **Note on `servicenow_incident_handler.yml`:** it no longer hardcodes the instance URL. It
+> sets `sn_instance: "{{ SN_HOST }}"` and **asserts** that `SN_HOST` is defined and non-empty
+> before it does anything else, so the playbook follows whichever credential the job template
+> carries. That is what makes one playbook safe to share across organizations.
+>
+> This means the `host` input and `SN_HOST` injector from [1.1](#11-create-a-custom-servicenow-credential-type)
+> are now **required**, not optional. If the credential attached here has no host value, the job
+> fails immediately on the assert with a readable message — which is the intended behaviour, and
+> far better than the undefined-variable error inside a `uri` task that you got before.
+>
+> The playbook also gates the incident close behind `sn_close_incident`, which defaults to
+> **`false`**. Pass `sn_close_incident=true` as an extra var when you actually want the ticket
+> closed. Two organizations pointed at one PDI would otherwise race to close the same ticket.
 
 ![Job template settings, with Prompt on launch ticked next to Extra variables](docs/images/13-controller-job-template.png)
 
@@ -955,9 +1021,152 @@ true, and the activation log shows:
 Event { ... } didn't match any rule and has been immediately discarded
 ```
 
-**Minimum required keys** for this repo's rulebook: `event_type` plus `incident_number`,
+**Minimum required keys** for `my_eda_rulebook.yml`: `event_type` plus `incident_number`,
 `short_description`, `priority`, `cmdb_ci`, `state`, `assigned_to`, `category`, `sys_id`.
 Omitting any mapped key causes the `StrictUndefined` failure described in Part 6.
+
+`team_a_rulebook.yml` and `team_b_rulebook.yml` map the same eight incident fields into
+`extra_vars`, plus three of the four reserved routing keys below — `event_version`, `source`,
+and `target_team`. `event_type` is not re-mapped into `extra_vars`; it is already consumed in
+the rule's `condition` (see Migration, below). Both rulebooks also pass through
+`event.meta.eda_event_stream_name` as `source_stream`, for audit and debugging.
+
+### The four reserved routing keys
+
+These are not ServiceNow fields. They exist only to let a rulebook decide *whether to act*,
+before the playbook ever sees the payload.
+
+> **Which producers this applies to.** The four keys are the contract for the **multi-tenant**
+> build — the Team A / Team B streams in [Part 8](#part-8--multi-organization-event-stream-topology).
+> Set all four on every event sent to those streams.
+>
+> The single-team reference script in [3.2](#32-create-the-action) predates this contract and
+> deliberately sends only `event_type` (the flat `incident_created` form that
+> `my_eda_rulebook.yml` matches). That is **not** a defect: with exactly one stream and one
+> consumer there is no tenant to discriminate, no second sender to distinguish, and no second
+> payload version to pin. Leaving it alone also keeps the original single-org walkthrough
+> working end to end.
+>
+> Adopt all four the moment *either* becomes true: a second activation is attached to a stream,
+> or a second sender posts to one. Both are the point at which an unrouted event can launch
+> someone else's automation.
+
+| Key | Example | Why it exists |
+|---|---|---|
+| `event_type` | `"servicenow.incident.created"` | Hierarchical dotted string. This is what a rule's `condition` matches on to decide *which* automation family an event belongs to. |
+| `event_version` | `1` | Integer, currently always `1`. Lets a rulebook pin its condition and its `extra_vars` mapping to a known payload shape, so a future reshape of the payload doesn't silently start matching (or silently stop matching) an old rule. |
+| `source` | `"pdi"` | Distinguishes a dev-origin send from a prod-origin send. On a stream shared by more than one sender, this is the only thing standing between a PDI test event and a job template that touches production. |
+| `target_team` | `"team_a"` | Tenant discriminator for a **shared** stream. `event.meta.eda_event_stream_name` (below) is the strong check — but on a stream two teams both point at, that value is identical for every event regardless of which team it's for, so it can't tell Team A's event from Team B's. `target_team` is the payload-level field that still can. |
+
+### Migration: flat `incident_created` → hierarchical `servicenow.incident.created`
+
+This repo used to standardize on a flat, undotted `event_type` string —
+`my_eda_rulebook.yml` still does:
+
+```yaml
+condition: event.payload.event_type == "incident_created"
+```
+
+`team_a_rulebook.yml` and `team_b_rulebook.yml` use the hierarchical form instead:
+
+```yaml
+condition: >-
+  event.meta.eda_event_stream_name == "sn-team-a" and
+  event.payload.event_type == "servicenow.incident.created"
+```
+
+Nothing in EDA enforces one form or the other — `event_type` is just a string, and `==` is a
+literal string comparison. What breaks is *mixing* them on one payload without updating every
+rule that reads it: if your Script step starts emitting `servicenow.incident.created` but a
+rule you haven't touched still checks for the old flat `incident_created`, the condition is
+never true again. There is no warning. The activation log shows the exact same discard message
+as a shape mismatch:
+
+```
+Event { ... } didn't match any rule and has been immediately discarded
+```
+
+When you change the `event_type` string a producer sends, grep every rulebook this repo ships
+for the old string before you ship the change, not after.
+
+### Ordering rule: set the reserved keys last
+
+If you build a payload by looping over a variable set of fields — copying extra columns off a
+GlideRecord, merging in caller-supplied `extra_data`, anything data-driven rather than a fixed
+object literal — set the four reserved keys **after** that loop runs, not before:
+
+```javascript
+var payload = {};
+
+// Loop that copies in a variable set of fields FIRST.
+for (var key in extraFields) {
+    payload[key] = extraFields[key];
+}
+
+// Reserved routing keys set LAST. Nothing above this line can overwrite them.
+payload.event_type = 'servicenow.incident.created';
+payload.event_version = 1;
+payload.source = 'pdi';
+payload.target_team = 'team_a';
+```
+
+If the loop ran second, a source system that happens to have its own column called `source` or
+`target_team` would silently overwrite your routing key with whatever it put there, and the
+rule would misroute or not fire — with nothing in the log to say why. The Script step in Part
+3.2 currently builds `payload` as a single flat object literal with no such loop, so this
+doesn't bite today. It will the first time anyone adds one.
+
+### The stronger check: `event.meta.eda_event_stream_name`
+
+`event.meta.eda_event_stream_name` and `event.meta.endpoint` are injected by the platform
+itself, after the payload leaves your Script step. A sender cannot set or forge them — there is
+no field in the outbound JSON that lands there. That makes `event.meta.eda_event_stream_name`
+strictly stronger than any payload field for telling activations apart, and it should be the
+**primary** condition, with `event_type` narrowing it further within that stream:
+
+```yaml
+condition: >-
+  event.meta.eda_event_stream_name == "sn-team-a" and
+  event.payload.event_type == "servicenow.incident.created"
+```
+
+This is exactly what `team_a_rulebook.yml` and `team_b_rulebook.yml` do today, one dedicated
+stream per team (`sn-team-a`, `sn-team-b`). `target_team` isn't load-bearing in that condition —
+it's just carried into `extra_vars` for audit and debugging. It only becomes load-bearing the
+day two team activations get mapped to the *same* stream: at that point
+`event.meta.eda_event_stream_name` is identical on every event regardless of which team it's
+for, and `target_team` is the only field left that can tell them apart. That's what
+`catchall_debug_rulebook.yml` and Experiment 4 exist to prove out before it's load-bearing
+anywhere real.
+
+### Headers: omitted unless listed, `Authorization` is always redacted
+
+HTTP headers from the inbound POST are **not** part of `event.payload` and are not exposed to
+the rulebook at all by default. A header only becomes visible if it is explicitly listed on the
+event stream's own configuration — and even then, `Authorization` is always redacted, no
+exception, no override. Never write a condition or an `extra_vars` mapping that reads
+`Authorization` off the event; it will not contain the token, in test mode or forwarding mode,
+regardless of what you configure.
+
+### `default('')` on every mapped field, or `StrictUndefined`
+
+Every `extra_vars` mapping in `team_a_rulebook.yml` and `team_b_rulebook.yml` carries a
+`| default('')`:
+
+```yaml
+incident_number: "{{ event.payload.incident_number | default('') }}"
+```
+
+Drop the filter on any one line and the day ServiceNow sends an event missing that field, the
+whole action — not just that one variable — fails to serialize, and **no job is launched**:
+
+```
+Object of type StrictUndefined is not JSON serializable
+```
+
+There's no partial launch and no fallback: one undefined Jinja value anywhere in
+`job_args.extra_vars` poisons the entire launch request. Add `| default('')` to every mapped
+field, including the four reserved keys, not just the ones you expect ServiceNow to omit.
 
 ---
 
@@ -1148,6 +1357,236 @@ Nothing in AAP survives a rebuild. You must:
 
 The ServiceNow side (action, flow, alias, credential) survives — only the URL and token
 change.
+
+---
+## Part 8 — Multi-organization event stream topology
+
+> Part 7 was already "Token rotation and maintenance," so this is **Part 8**, not Part 7.
+>
+> Verified against a Red Hat Developer Sandbox on **AAP 2.7**. Nothing here has been checked
+> against 2.6 or 2.5. Where a claim depends on how EDA's Postgres listener or the event-stream
+> mapping validator is implemented, treat it as version-sensitive and re-verify before you rely
+> on it against a different build.
+
+### 8.1 The question this section answers
+
+Once a second team wants ServiceNow to trigger its own automation, you hit a design choice:
+
+- **One shared event stream** that every team's activation maps to, or
+- **One event stream per organization**, each with its own token and its own activation.
+
+The answer hinges entirely on one fact you cannot see from the AAP UI: **does an event stream
+deliver each inbound POST to every mapped activation, or to exactly one of them?** Those are
+two different delivery models with opposite consequences for a shared stream:
+
+| Model | One event POSTed to a stream mapped to 2 activations |
+|---|---|
+| Fan-out (broadcast) | Both activations receive it. Both can match and launch. |
+| Queue (competing consumers) | Exactly one activation receives it. The other never sees it. |
+
+If it's fan-out, a shared stream is a live footgun — every team's activation sees every other
+team's events, and only your rule conditions stand between "Team A's incident" and "Team B's
+job template gets launched too." If it's a queue, a shared stream is merely inconvenient
+(you'd need routing logic anyway, and delivery could round-robin unpredictably). The rest of
+this section explains why the answer is fan-out, why that pushes the design toward one stream
+per organization, and where the honest limits of that conclusion are.
+
+### 8.2 The evidence: this is fan-out (inference from upstream source, not a documented guarantee)
+
+Red Hat's docs do not state the delivery semantics of an event stream mapped to multiple
+activations anywhere. The following is inferred from reading the `ansible/eda-server` source,
+not quoted from a Red Hat page:
+
+- `Activation.event_streams` is a genuine `ManyToManyField` — nothing in the schema limits an
+  event stream to one activation.
+- Each event stream gets a Postgres `LISTEN/NOTIFY` channel named `eda_event_stream_<uuid>`,
+  derived **only** from the stream's own UUID. No activation identity is folded into the
+  channel name.
+- An inbound POST to the stream's endpoint issues a single `NOTIFY` on that one channel.
+- Every activation mapped to that stream opens a `LISTEN` on that same channel.
+- `LISTEN/NOTIFY` in Postgres is a broadcast primitive: no queue, no acknowledgment, no
+  consumer group, no row-claiming. Every listener on a channel gets every notification.
+
+Put together: **N activations mapped to one stream = N independent listeners on the same
+broadcast channel = N copies of every event = potentially N job launches from one ServiceNow
+POST.** That is a fan-out model, not a queue.
+
+This is inference, not proof by observation. **Experiment 4** exists specifically to confirm
+it empirically on the shipped 2.7 build: `rulebooks/catchall_debug_rulebook.yml` is the
+instrument — map the *same* catch-all rulebook onto both Team A's and Team B's activations,
+both pointed at one shared stream, POST one event, and count how many activation logs show it.
+Two logs confirms fan-out; one log would falsify it. That rulebook is a temporary test artifact
+and is deleted once Experiment 4 is recorded — don't build on it staying in the repo.
+
+Separately, an **offline** test run today (no AAP involved, using
+`ansible.eda.generic`) confirmed a supporting fact: the source preserves a user-supplied `meta`
+block on each payload item and merges the platform's own keys (`received_at`, `source`,
+`uuid`) into it, rather than replacing it. That means `event.meta.eda_event_stream_name` can be
+simulated locally, and the routing logic that depends on it — Team A's rulebook matching only
+`sn-team-a`, Team B's matching only `sn-team-b` — is testable with no AAP at all. That test is
+about the *discriminator logic* being correct; it is not the fan-out cardinality test.
+Experiment 4 is still the one that answers 8.1.
+
+### 8.3 Correction: Red Hat does not recommend one stream per organization
+
+An earlier assumption in this project's notes was that Red Hat recommends one event stream per
+organization. That is wrong, and worth stating plainly so it doesn't get repeated:
+
+- Searching the event-routing chapters for AAP 2.5, 2.6, and 2.7 (the section is titled
+  *simplified event routing*, not "event stream routing") turns up no such guidance.
+  "Organization" appears there only as the name of a form field when you create a stream — not
+  as part of any routing recommendation.
+- What Red Hat *does* document is the opposite axis: a single event stream endpoint is meant
+  to receive events from one source and then be usable across **multiple rulebooks** — i.e.
+  Red Hat's own framing leans toward fewer endpoints, reused broadly, not one endpoint per
+  tenant.
+
+**One event stream per organization is this project's own design decision**, made because of
+the fan-out finding in 8.2, the token-isolation reasoning in 8.5, and the org-scoping table in
+8.4 — not because any vendor documentation says to do it. Present it that way if you write this
+up anywhere else: "our decision, for these reasons," never "Red Hat's recommended pattern."
+
+### 8.4 What has to be duplicated per organization, and what doesn't
+
+| Object | Scope | Consequence for a second team |
+|---|---|---|
+| Credentials (ServiceNow PDI, AAP Controller, Event Stream Token, Registry) | Per organization | Team A and Team B each need their own copy, even where the values would be identical |
+| Projects (both the controller "EDA ServiceNow" project and the EDA "Ansible EDA Test" project) | Per organization | Each org syncs its own project, independently, from the same or a different Git ref |
+| Job templates | Per organization | `Team A Incident Handler` and `Team B Incident Handler` are separate objects, matched by name from `job_args`/`run_job_template` — see the `name:` field in `rulebooks/team_a_rulebook.yml` and `rulebooks/team_b_rulebook.yml` |
+| Decision Environments | Per organization | Each org's activation references its own DE, even if it's the same container image |
+| Event streams | Per organization | The core of this section — see 8.1–8.3 |
+| Rulebook activations | Per organization | One activation pod per org, running that org's rulebook |
+| **Credential types** (the custom `ServiceNow` type from Part 1.1) | **Global** | Defined once. Every org's ServiceNow credential is an *instance* of this one type. The `host` input / `SN_HOST` injector is part of the type definition in [Part 1.1](#11-create-a-custom-servicenow-credential-type), so you add it **once**, globally — you do not redefine the type per org, you just re-save each org's own credential instance afterward. |
+
+Today, only the `Default` organization exists in this sandbox. `Team A` and `Team B` do not
+exist as AAP organizations yet — but `rulebooks/team_a_rulebook.yml` and
+`rulebooks/team_b_rulebook.yml` already reference `organization: "Team A"` /
+`organization: "Team B"` and job templates named `Team A Incident Handler` /
+`Team B Incident Handler` that don't exist yet either. That's expected: those rulebooks are
+written for the multi-org state this section describes, ahead of the orgs being created. Until
+the orgs, credentials, projects, job templates, DEs, and streams in the table above all exist,
+activations built from those two rulebooks will fail to launch with a job-template-not-found
+error, not a routing error.
+
+### 8.5 Why each stream needs its own token
+
+The event stream's bearer token lives on an **Automation Decisions credential**
+(`ServiceNow Event Stream` type), and that credential is what the stream's endpoint checks on
+every POST. If two streams — say, Team A's and Team B's — were built against the **same**
+credential, they'd accept the **same** token. Anyone holding that token, or anyone who can
+guess or discover the second stream's URL (the UUID in the path is not a secret in the way the
+token is), can post to both endpoints. A compromised or leaked Team A token would double as a
+valid credential for Team B's stream too.
+
+Giving every stream its own credential and its own token means a leak is contained to exactly
+one team's endpoint. It also makes token rotation (Part 7) a per-team operation instead of an
+all-teams-at-once outage window.
+
+### 8.6 The rulebook change cycle — do these in this exact order
+
+Source mappings are pinned to a **SHA256 of the rulebook file**, computed at the time you
+attach the event stream to the activation. Red Hat states plainly what happens if that hash
+goes stale: *"If the rulebook is modified after the source mapping has been created and a
+Restart happens, the rulebook activation fails."* The API's own error text for this is
+**"Rulebook has changed since the sources were mapped. Please reattach event streams."**
+
+That means **every** rulebook edit — not just a first-time setup — requires this full cycle,
+per organization whose rulebook you touched:
+
+1. Edit the rulebook file (e.g. `rulebooks/team_a_rulebook.yml`).
+2. Commit the change.
+3. Push to the branch the EDA project tracks.
+4. **Sync the EDA project** in Automation Decisions. The activation reads the rulebook from
+   the project's synced copy, not from your working tree or from GitHub directly.
+5. **Re-attach the event stream source mapping** — the gear icon on the activation, same place
+   as the original mapping in Part 2.7. This recomputes the SHA256 against the new file.
+6. Restart the activation.
+
+Skipping step 5 is the trap: steps 1–4 and 6 all succeed, the activation starts, and it fails
+immediately with the "Rulebook has changed" error above — which reads like a sync problem, not
+a "you forgot to re-click the gear icon" problem.
+
+> This repo's own state right now is a live example of why step 4 matters and why it's easy to
+> forget: the controller project **"EDA ServiceNow"** last synced at `798a684`, and the EDA
+> project **"Ansible EDA Test"** last synced at `81a1695` — two *different* revisions of the
+> same repo, because Automation Execution and Automation Decisions sync independently even
+> though they point at the same Git URL. Worse, `origin/main` is currently at `de64871`, **11
+> commits ahead** of the `81a1695` the EDA project has. Until the EDA project is resynced, its
+> rulebook list — and the SHA256 any existing mapping is pinned to — is 11 commits stale. Don't
+> assume a synced project reflects `main`; check its `git_hash` against `git log` before you
+> debug a mapping failure as anything else.
+
+### 8.7 The cost model: streams are cheap, activations are pods
+
+- An event stream is a database row plus a Postgres `LISTEN/NOTIFY` channel. Creating ten of
+  them costs you ten rows.
+- A **rulebook activation**, if enabled, is an always-on pod running `ansible-rulebook` inside
+  its Decision Environment image, for as long as it's enabled — not on demand.
+
+That asymmetry is an argument for the topology in 8.4 as stated: put the isolation boundary on
+the **stream**, which is nearly free to multiply, rather than on the activation, which is not.
+One activation per organization is already the minimum the fan-out finding in 8.2 requires; the
+mistake to avoid is adding *extra* activations (e.g. one per rulebook version, or one per test
+scenario) when another stream would do.
+
+There's a second reason to keep the activation count down on a small cluster specifically: this
+sandbox's own troubleshooting history showed that an activation's pod validates its connection
+to the Controller **at startup**, before it serves a single event — `ansible-rulebook`'s
+`job_template_runner` calls the Controller during activation start, and if the Controller pod is
+itself cold-starting it returns `503` (retried 5 times via `aiohttp_retry`), the readiness check
+times out at roughly 65 seconds, and the activation restarts. That was previously misdiagnosed
+as memory/CPU pressure; it isn't. Every additional always-on activation is one more pod that
+independently races the Controller's own startup time, and on Kubernetes, EDA sets only
+`limits` on activation pods (never `requests` — both default to `None`), so what each pod
+actually gets to run with is decided entirely by the cluster's `LimitRange`, not by EDA. More
+activations means more simultaneous exposure to that startup race, on infrastructure that isn't
+sizing them predictably in the first place.
+
+### 8.8 The cross-org caveat — don't design on this either way
+
+One more question the fan-out finding raises: **can an activation in one organization select an
+event stream that belongs to a different organization?** This is genuinely undocumented and
+untested upstream. From reading the source, the only gate on it is RBAC — whether your account
+has permission to see and select the other org's stream in the mapping UI — and the mapping
+validator itself performs **no organization-equality check**. That's a statement about the
+current code path, not a guarantee about behavior, and it is exactly the kind of implementation
+detail that changes without a changelog entry.
+
+Whatever Experiment 4 or any other hands-on test in this sandbox shows about cross-org
+selection working (or failing) — **do not build a design around it**. If you need an
+organization boundary to hold, enforce it with separate streams and separate tokens (8.4, 8.5)
+that make cross-org delivery structurally impossible, not with an assumption about validator
+behavior that Red Hat has never committed to.
+
+### 8.9 Known gotchas
+
+- **"An event stream can only be used once in a rulebook source swap" is per-activation, not
+  global.** Read literally, that line sounds like it forbids exactly the fan-out topology this
+  section is about. It doesn't: it means you cannot map one stream to two different `sources:`
+  entries **inside the same activation's own rulebook**. It says nothing about whether two
+  *different* activations can each map the same stream to their own single source — which is
+  the fan-out case Experiment 4 tests. Misreading this as a global uniqueness rule would wrongly
+  rule out per-stream fan-out before you'd even run the experiment.
+- **On a shared stream, `event.meta.eda_event_stream_name` is identical for every tenant and is
+  therefore useless as a per-tenant discriminator.** It's only unforgeable-and-useful the way
+  Team A/Team B's rulebooks use it (Part 8.2's fan-out logic aside) when each tenant has its
+  *own* stream. On a genuinely shared stream you'd have to fall back to a payload field like
+  `target_team`, which — unlike `event.meta.*` — a sender could forge.
+- **HTTP headers are dropped from the event unless the stream explicitly lists them, and
+  `Authorization` is always redacted regardless.** Never write a rule condition against
+  `event.meta.headers.Authorization` (or any header) expecting to use it for routing — by
+  design, the one header you'd most want to check is the one you can never see.
+- **A stream must have forwarding on (`test_mode: false`) before it can even be selected on an
+  activation's mapping page.** A stream left in test mode simply doesn't appear as an option —
+  that's a configuration gap, not proof the routing logic is broken, if you're troubleshooting
+  why a stream "isn't there." (Don't confuse this with `sn-team-c` from the offline
+  discriminator test in 8.2 — that was never a real AAP stream in test mode, just an
+  unrecognized stream-name value used to prove neither team's rulebook matches an unknown
+  tenant on a simulated event.)
+- **The two testing modes are mutually exclusive, per stream.** Forwarding on, and you read the
+  activation log; forwarding off, and you read the stream's Events tab and nothing launches
+  (this is also called out in Part 2.6, for the single-stream case — it applies per stream here
+  too).
 
 ---
 
