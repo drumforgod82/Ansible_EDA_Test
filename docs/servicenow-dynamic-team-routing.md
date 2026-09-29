@@ -832,9 +832,50 @@ No flow or action changes.
 
 ## 10. Making routing smarter later
 
-Today routing is "assignment group → team". Eventually you may want "P1 database incidents go to
-Team B regardless of group". There are three ways to get there. **Read all three before picking** —
-most people reach for the Decision Table when option 1 would have done the job.
+**Decide where the logic belongs before adding any.** There are two layers and they answer different
+questions:
+
+| Layer | Question it answers | How you extend it |
+|---|---|---|
+| **ServiceNow route table** | *Which team's stream does this incident go to?* | One row per team. That's it |
+| **The team's rulebook** | *What automation runs for this incident?* | Add rules with conditions |
+
+**A team needing different automation for different incidents is a rulebook change, not a routing
+change.** The payload already carries everything you would branch on — `priority`, `priority_value`,
+`state`, `urgency`, `impact`, `category`, `cmdb_ci`, `business_service`, `short_description` — so the
+rulebook can dispatch without ServiceNow knowing anything about it:
+
+```yaml
+  rules:
+    - name: Launch Team A critical handler
+      condition: >-
+        event.meta.eda_event_stream_name == "sn-team-a" and
+        event.payload.event_type == "servicenow.incident.created" and
+        event.payload.priority_value == "1"
+      action:
+        run_job_template:
+          name: "Team A Critical Incident Handler"
+          organization: "Team A"
+
+    - name: Launch Team A incident handler
+      condition: >-
+        event.meta.eda_event_stream_name == "sn-team-a" and
+        event.payload.event_type == "servicenow.incident.created" and
+        event.payload.priority_value != "1"
+      action:
+        run_job_template:
+          name: "Team A Incident Handler"
+          organization: "Team A"
+```
+
+That keeps ServiceNow at one row per team, puts the branching in a purpose-built rule engine, and
+means changes ship through Git and the normal
+[change cycle](../README.md#213-the-change-cycle-for-any-rulebook-edit) rather than through Flow Designer.
+
+**So keep the route table at one row per team.** The options below only apply to the genuinely rare
+case where **the team itself changes based on incident content** — "P1 database incidents go to Team B
+even though the group says Team A". If the destination team is stable and only the *work* differs, use
+rulebook rules and skip the rest of this section.
 
 Everything below replaces **flow step 1 only**. The action, the REST step, both scripts, and the
 log table never change.
@@ -853,28 +894,46 @@ exactly what you said you wanted to avoid. So it is not automatically the right 
 
 ---
 
-### Option 1 — More columns, wider lookup condition ★ recommended first
+### Option 1 — More columns, wider lookup condition
 
-**No script. No new concepts. Fifteen minutes.**
+**Simplest of the three if you need it. No script, no new concepts.**
 
-The `Look Up Record` step already has a full condition builder. To route on more than group, add
-columns to the route table and widen the condition.
+> **You probably do not need this.** It only helps when **one assignment group must route to more
+> than one destination** — say critical Team-A incidents going to a different stream than low-priority
+> ones. In the build described by this guide, the trigger filters on `Caller = Event Management` and
+> the lookup matches on assignment group alone, so one group maps to exactly one row and there is
+> nothing to widen. Adding Priority and Category columns then gives you fields that never change the
+> outcome. Skip to §9 unless multi-destination routing is an actual requirement.
 
-1. Open the `EDA Team Route` table, add columns for whatever you want to match on — for example
-   **Priority** (String, 40) and **Category** (String, 40). Leave them empty to mean "any".
-2. In the flow's **Look Up Record** step, add conditions:
+If it is a requirement:
+
+1. Add the columns you want to match on to `EDA Team Route` — for example **Priority** (String, 40)
+   and **Category** (String, 40). **Leave a column empty on a row to mean "any value"**.
+2. Add an **Order** column (Integer). This is **not optional** — see the warning below.
+3. In the flow's **Look Up Record** step, express each optional field as **two OR'd condition rows**,
+   not as a single "is one of":
 
    ```
-   Assignment group  is  Trigger → Incident → Assignment group
-   Active            is  true
-   Priority          is one of  (empty)  OR  Trigger → Incident → Priority
+   Assignment group  is          Trigger → Incident Record → Assignment group
+   AND  Active       is          true
+   AND ( Priority    is empty
+         OR Priority is          Trigger → Incident Record → Priority )
    ```
 
-3. Add an **Order** column (Integer) and sort the lookup by it ascending, so a specific row can win
-   over a general one.
+   Use the condition builder's **or** button to create the second row of the pair, and a condition
+   set to group it. The `is empty` row is what makes a blank column behave as a wildcard.
 
-Covers the large majority of "route on more than one thing" needs. Reach past it only when the
-logic genuinely needs OR-of-ANDs across many fields.
+4. Set **Order by** = `Order`, direction **a to z** (ascending), and keep *If multiple records are
+   found* on **Return only the first record**.
+
+> ⚠️ **With wildcards, more than one row matches — and `Order by` is the only tiebreaker.** A specific
+> row (`Priority = 1 - Critical`) and a catch-all row (`Priority` empty) both satisfy the condition for
+> a critical incident. *Return only the first record* then picks whichever the sort puts first, so
+> without an explicit `Order by` the winner is effectively arbitrary and will appear to change for no
+> reason. Give specific rows a **lower** Order number than general ones.
+
+Covers the large majority of genuine "route on more than one thing" needs. Reach past it only when the
+logic needs OR-of-ANDs across many fields.
 
 ---
 
@@ -1102,7 +1161,8 @@ Store the decision table's sys_id in the scoped property
 
 | | Script? | Who edits rules | Best when |
 |---|---|---|---|
-| **1. Wider lookup condition** | none | you, in the flow | routing is a handful of field matches — **start here** |
+| **0. Rulebook rules** | none in ServiceNow | the team, in Git | **the destination team is stable and only the automation differs — this is the right answer almost always** |
+| **1. Wider lookup condition** | none | you, in the flow | the **team** must change based on a handful of incident fields |
 | **2. Conditions column** | one small step | anyone, per table row | many rules, each independently editable |
 | **3. Decision Table** | one step + unverified API | process owners, in Decision Builder | logic is governed, audited, or owned outside the platform team |
 
