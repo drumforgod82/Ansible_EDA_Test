@@ -28,6 +28,19 @@ click, what to type, and how to prove it worked.
 13. [Appendix A — OAuth 2.0 direct job launch (alternative)](#appendix-a--oauth-20-direct-job-launch-alternative)
 14. [Appendix B — Legacy Business Rule (do not use)](#appendix-b--legacy-business-rule-do-not-use)
 
+### Companion guides in `docs/`
+
+This README covers the **single-team** build end to end. These go further:
+
+| Guide | Covers |
+|---|---|
+| [Dynamic team routing](docs/servicenow-dynamic-team-routing.md) | Routing one incident to the right team's event stream at run time via an `EDA Team Route` config table, instead of one flow per team. Includes the Flow Designer build, both action scripts, cross-scope privileges, and three later upgrade paths. |
+| [Phase 2b two-org runbook](docs/phase2b-two-org-runbook.md) | Standing up two AAP organizations with their own streams, credentials, and activations, in dependency order. Records what AAP does and does not isolate per org. |
+| [AAP EDA project sync fix](aap-eda-project-sync-fix.md) | Diagnosing an EDA project sync stuck in `Pending` — the default worker is OOMKilled mid-clone at 400Mi. |
+
+Scripts pasted into ServiceNow live in [`docs/scripts/`](docs/scripts/) and are the canonical
+copies. Paste from those files rather than from a rendered page.
+
 ---
 
 ## Build order — do these in this exact sequence
@@ -425,6 +438,20 @@ The playbook runs `hosts: localhost` with `connection: local`, so the inventory 
 > The playbook also gates the incident close behind `sn_close_incident`, which defaults to
 > **`false`**. Pass `sn_close_incident=true` as an extra var when you actually want the ticket
 > closed. Two organizations pointed at one PDI would otherwise race to close the same ticket.
+>
+> **Current state:** **both** `team_a_rulebook.yml` and `team_b_rulebook.yml` pass
+> `sn_close_incident: true`, so EDA-triggered runs close the incident for either team. Verified
+> 2026-09-29 on INC0010017 (job 38): `Close Complete the incident` reported `changed`, and
+> `close_code: "Solution provided"` matched the PDI's choice list.
+>
+> The two-org race this flag guards against was only possible under the **old single-stream
+> fan-out**, where both activations read one stream. With per-team streams plus the
+> [`EDA Team Route`](docs/servicenow-dynamic-team-routing.md) table, each incident reaches exactly
+> one stream, one activation, and one team — and activation 1 (`ServiceNow Event Stream Rulebook`)
+> is stopped, which removes the last path to a double close.
+>
+> The **playbook default stays `false`**. Enable it per team in the rulebook, never by flipping the
+> default — if you ever reintroduce a shared stream, the default is what protects you.
 
 ![Job template settings, with Prompt on launch ticked next to Extra variables](docs/images/13-controller-job-template.png)
 
@@ -704,10 +731,34 @@ All → Process Automation → Flow Designer (or Workflow Studio) → New → Ac
 | Label | Name | Type | Mandatory |
 |---|---|---|---|
 | Incident Record | `incident_record` | Reference → Incident | false |
+| Team Code | `team_code` | String | false |
+| Event Stream UUID | `event_stream_uuid` | String | false |
+| Connection Alias | `connection_alias` | Connection & Credential Aliases | false |
+
+The last three exist so the flow can pick the team at run time instead of hardcoding one
+endpoint per flow. See [Dynamic team routing](docs/servicenow-dynamic-team-routing.md).
 
 > ⚠️ **Input names are case-sensitive in scripts.** If the input is created as
 > `Incident_record`, then `inputs.incident_record` is `undefined` and the script throws
 > "Invalid or missing incident record". The script below tolerates either spelling.
+>
+> **This applies to every script step's own input variables too, and they are a separate
+> layer.** An action input is not visible to `inputs.*` inside a step — the step must declare
+> its own variable *and* have the action's pill mapped into it. Two independent wiring actions;
+> miss either and the value is silently `undefined`. Strict mode does not catch it, because
+> reading a missing property is not an error.
+>
+> Two failures from this on 2026-09-29, both silent: step 3 declared `StatusCode`/`ResponseBody`
+> while the script read `inputs.status_code`/`inputs.response_body`, producing `success = false`
+> and the error string `HTTP :` on a genuine HTTP 200; and step 1 never declared `team_code` at
+> all, so every payload shipped with `target_team` empty. **An error message with empty
+> interpolation holes, or an output blank while its source input is visibly populated in
+> execution details, means a name mismatch — not an endpoint problem.**
+
+> ⚠️ **Feed the REST step's Connection Alias the bare reference pill.** Do not dot-walk it to
+> `→ Sys ID`. The dot-walked form fails with `Unable to load connection with alias ID:` followed
+> by the alias's *scoped name*, which reads like the connection record is missing and sends you
+> auditing `sys_alias` records that are fine.
 
 ![Action inputs — Incident Record](docs/images/50-sn-action-inputs.png)
 
@@ -877,39 +928,32 @@ The `Authorization` header comes from the alias — do not add it by hand.
 
 #### Step 3 — Script step: "Process Response"
 
-```javascript
-(function execute(inputs, outputs) {
-    // If payload building failed, pass that error through
-    if (!inputs.PayloadSuccess) {
-        outputs.success = false;
-        outputs.http_status = '';
-        outputs.error_message = inputs.PayloadErrorMessage || 'Payload build failed';
-        outputs.payload = '';
-        outputs.response_body = '';
-        return;
-    }
+**Canonical script: [`docs/scripts/step3_process_response.js`](docs/scripts/step3_process_response.js).**
+Paste from that file, not from a rendered page — copying out of Markdown can convert straight
+quotes to curly ones, which leaves an unterminated string and reports as `')' expected`.
 
-    var httpStatus   = inputs.StatusCode  || '';
-    var responseBody = inputs.ResponseBody || '';
-    var stepError    = inputs.ErrorMessage || '';
-    var stepMessage  = inputs.StepStatusMessage || '';
+It declares **three** input variables, all lowercase:
 
-    outputs.http_status   = httpStatus.toString();
-    outputs.payload       = inputs.Payload || '';
-    outputs.response_body = responseBody;
+| Variable name | Mapped from |
+|---|---|
+| `status_code` | Step 2 → Status Code |
+| `response_body` | Step 2 → Response Body |
+| `rest_error_message` | Step 2 → Error Message |
 
-    if (httpStatus == '200' || httpStatus == '201') {
-        outputs.success = true;
-        outputs.error_message = '';
-    } else if (stepError) {
-        outputs.success = false;
-        outputs.error_message = stepError + (stepMessage ? ' - ' + stepMessage : '');
-    } else {
-        outputs.success = false;
-        outputs.error_message = 'HTTP ' + httpStatus + ': ' + responseBody.substring(0, 200);
-    }
-})(inputs, outputs);
-```
+and **four** outputs: `success`, `http_status`, `response_body`, `error_message`. No `payload`
+output on this step — the action's `payload` output must come from **Step 1**, which is the only
+step that assigns it.
+
+> ⚠️ **This replaced an earlier CamelCase version of this script** that read
+> `inputs.StatusCode`, `inputs.ResponseBody`, `inputs.ErrorMessage`, `inputs.PayloadSuccess`,
+> `inputs.PayloadErrorMessage`, and `inputs.Payload`. If your step still declares those
+> CamelCase variables, the current script reads `undefined` from all of them and reports
+> `success = false` with the error string `HTTP :` even on a genuine HTTP 200. Rename the
+> variables; do not rename the script.
+>
+> The dropped `PayloadSuccess` passthrough is no longer needed: Step 1 **throws** on bad input,
+> which errors the action, so Step 3 never runs with an invalid payload. If you change Step 1 to
+> `return` instead of `throw`, restore that gate.
 
 > ⚠️ If this step reports a failure while the REST step returned 200, the culprit is almost
 > always a flag it reads that was never **declared** as an output variable. Undeclared

@@ -49,3 +49,9 @@
               target_team: "{{ event.payload.target_team | default('') }}"
               # Which stream actually delivered this event.
               source_stream: "{{ event.meta.eda_event_stream_name | default('') }}"
+              # Close the incident. The playbook defaults this to false to stop two orgs
+              # racing to close one ticket, which was only possible under the old
+              # single-stream fan-out. Per-team streams plus the EDA Team Route table send
+              # each incident to exactly one team, and activation 1 is stopped, so the race
+              # cannot occur. Enabled on both teams to keep behaviour symmetric.
+              sn_close_incident: true
