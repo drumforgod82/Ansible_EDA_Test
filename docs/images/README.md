@@ -28,10 +28,10 @@ text, so keep them masked in any replacement capture.
 | `31-activation-running.png` | Activation in Running state |
 | `40-sn-credential-alias.png` | Connection & Credential Alias |
 | `41-sn-http-connection.png` | HTTP(s) Connection pointing at the AAP host |
-| `42-sn-api-key-credential.png` | API Key credential — header Authorization, value 'Bearer <token>' |
+| `42-sn-api-key-credential.png` | API Key credential — header `Authorization`, bare token, **API Key Prefix empty** |
 | `50-sn-action-inputs.png` | Action inputs — Incident Record |
 | `51-sn-script-step-outputs.png` | Script step output variables (must be declared) |
-| `52-sn-rest-step.png` | REST step using the connection alias |
+| `52-sn-rest-step.png` | REST step — Connection Alias and Event Stream UUID as **pills** |
 | `53-sn-result-script-outputs.png` | Result script step output variables |
 | `54-sn-action-outputs.png` | Action outputs mapped from step pills |
 | `50.1-sn-script-step-inputs.png` | Script step input variables and script body |
@@ -40,7 +40,6 @@ text, so keep them masked in any replacement capture.
 | `62-sn-flow-if-success.png` | If condition on the action's Success output |
 | `63-sn-flow-update-record.png` | Then → Update Record with work notes |
 | `64-sn-flow-log-info.png` | Log step, Info level |
-| `65-sn-flow-else.png` | Else branch — update record and log the error |
 | `66-sn-flow-error-handler.png` | Full flow with the error handler expanded |
 | `80-aap-oauth-application.png` | OAuth application — authorization code, confidential |
 | `81-aap-allow-external-oauth.png` | Settings → Platform Gateway → Allow External Users to Create OAuth2 Tokens |
@@ -72,3 +71,8 @@ text, so keep them masked in any replacement capture.
 | `91-aap-two-event-streams.png` | `sn-team-a` and `sn-team-b`, each in its own org with its own credential |
 | `92-aap-two-activations.png` | Both activations running, each mapped to its own stream |
 | `95-aap-job-extra-vars.png` | A successful Team A job with `target_team`, `source_stream` and `sn_close_incident` populated |
+
+## Recaptured for the two-team setup (2026-09-29)
+
+`40`, `42`, `52`, `53`, `60`, `66` were retaken. `65-sn-flow-else.png` was **deleted** — the flow has
+no Else branch; the failure path works via End Flow inside the `then` branch.

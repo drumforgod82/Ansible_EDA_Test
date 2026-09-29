@@ -231,12 +231,11 @@ security find-generic-password -a "$USER" -s sandbox-eda-team-a -w
 security find-generic-password -a "$USER" -s sandbox-eda-team-b -w
 ```
 
-> **Unresolved: `Bearer ` prefix or not.** `references/integration-and-secrets.md` says store
-> `Bearer <token>` with the prefix *inside* the API Key value, verified 2026-09-18 against an
-> AAP 2.7 event stream. But a direct `curl` on 2026-09-28 got **HTTP 200 with the bare token**, and
-> the `Bearer ` form was never tested. Both may be accepted. Start bare; if the POST returns 401,
-> add the prefix inside the credential value. Record which one works and fix whichever note is
-> wrong.
+> **Resolved 2026-09-29: store the token bare, with no `Bearer ` prefix.** The AAP event stream uses
+> the `ServiceNow Event Stream` credential type (`auth_type: token`, `http_header_key: Authorization`),
+> which compares the incoming header value against the stored token verbatim. ServiceNow's API Key
+> credential sends the field exactly as entered, so `Bearer <token>` would not match and returns 401.
+> Verified against the live Team A and Team B streams, which are configured bare and working.
 
 **Alias** — *Connection & Credential Aliases → New*: `Ansible EDA Team A Alias` /
 `Ansible EDA Team B Alias`, type **Connection and Credential**, connection type **HTTP**.
@@ -814,7 +813,7 @@ expect the mirror image — that is Experiment 1 (isolation).
 | Symptom | Most likely cause |
 |---|---|
 | No stream counter moves | Flow did not run — check the trigger condition and the Sys ID gate (§5.9) |
-| `EDA Publish Log` row with 401 | Credential value: try the `Bearer ` prefix (§5.2) |
+| `EDA Publish Log` row with 401 | Token mismatch. Compare lengths on both sides — 64 chars — and confirm the value is bare with no prefix (§5.2) |
 | `EDA Publish Log` row with 404 | `resource_path` pill resolved empty, or a stale UUID in the route row |
 | Counter moves, no job launches | Rulebook mismatch — compare `event_type` and `eda_event_stream_name` |
 | Both teams' rules fire on one event | Both activations mapped to the same stream — fan-out, not a queue |

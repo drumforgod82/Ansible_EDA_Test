@@ -24,7 +24,7 @@ click, what to type, and how to prove it worked.
 9. [Part 5 — Testing end to end](#part-5--testing-end-to-end)
 10. [Part 6 — Troubleshooting](#part-6--troubleshooting)
 11. [Part 7 — Token rotation and maintenance](#part-7--token-rotation-and-maintenance)
-12. [Part 8 — Multi-organization event stream topology](#part-8--multi-organization-event-stream-topology)
+12. [Part 8 — Why the topology is this way](#part-8--why-the-topology-is-this-way)
 13. [Appendix A — OAuth 2.0 direct job launch (alternative)](#appendix-a--oauth-20-direct-job-launch-alternative)
 
 ### Companion guides in `docs/`
@@ -807,10 +807,27 @@ AAP scopes almost everything to an organization. Verified classification:
 > ⚠️ **Missing either one produces `401`, not `403`** — which reads as a wrong password and sends
 > you resetting credentials that were fine. Check the roles before the password.
 
+Unlike Part 2, **Part 3 is a mix.** Some of it is built once and shared; some repeats per team:
+
+| § | What | How many |
+|---|---|---|
+| 3.0 | Scoped application | **One**, shared. Do not create an app per team |
+| 3.0.1 | Assignment groups | **One per team**, in Global |
+| 3.1 | Alias + connection + credential | **One set per team** — this is where each team's token lives |
+| 3.2 | Action | **One**, shared. Team values arrive as its four inputs |
+| 3.3 | Flow | **One**, shared. It looks up the team and passes the values in |
+| — | Route table rows | **One row per team** — see [Dynamic team routing](docs/servicenow-dynamic-team-routing.md) |
+
+That split is the point of the design: adding a third team means a group, an alias set, and a route
+row — no new action, no new flow, no script changes.
+
 ### 3.0 Create the scoped application — do this first
 
 **Build none of this in Global.** Everything in Part 3 — the alias, the connection, the
 credential, the action, the flow, and the route table — belongs inside a scoped application.
+
+**One application for all teams.** The scope is not a per-team boundary; teams are separated by
+credentials and route rows inside it.
 
 1. **All → System Applications → Studio → Create application** (or use App Engine Studio).
 2. Give it a **Name** — this repo's is `James EDA Test`. Leave the **Scope** field alone; ServiceNow
@@ -890,64 +907,103 @@ Add at least one member to each so you have someone to assign test incidents to.
 > connection produces `Unable to load connection with alias ID:` at run time — see the three
 > variants of that message in the routing guide.
 
-This is the supported way to send `Authorization: Bearer <token>` and it requires **no
-script**.
+This is the supported way to send the `Authorization` header and it requires **no script**.
 
 > ⚠️ **Do not use a `password2` system property with `GlideEncrypter`.** On current
 > ServiceNow releases `GlideEncrypter` is deprecated and **returns null** (TripleDES removal,
 > KB1320986), so a `password2` value cannot be read back in script at all — and anything
 > already stored in one is unrecoverable ciphertext. Use the alias below.
 
-**Step 1 — Connection & Credential Alias**
+**Do this whole subsection once per team.** Each team's alias carries that team's own token, which
+is what keeps one team unable to post to the other's stream. Worked example:
 
-All → Connections & Credentials → Connection & Credential Aliases → New
+| | Team A | Team B |
+|---|---|---|
+| Credential | `Ansible EDA Team A Token` | `Ansible EDA Team B Token` |
+| Alias | `Ansible EDA Team A Alias` | `Ansible EDA Team B Alias` |
+| Connection | `Ansible EDA Team A Connection` | `Ansible EDA Team B Connection` |
 
-- **Name:** `EDA Event Stream`
-- **Type:** Connection and Credential
+**Step 1 — Credential** (create this first; the connection needs it)
 
-**Step 2 — HTTP(s) Connection**
-
-From the alias, create a new HTTP(s) Connection:
-
-- **Name:** `EDA Event Stream Connection`
-- **Connection URL:** `https://<your-aap-host>`
-- **Credential:** the credential from Step 3
-
-**Step 3 — Credential**
-
-Create a credential of type **API Key**:
+*All → Connections & Credentials → Credentials → New → **API Key Credentials***
 
 | Field | Value |
 |---|---|
+| Name | `Ansible EDA <Team> Token` |
 | API Key Header | `Authorization` |
-| API Key | `Bearer <token>` — the token from 2.4, with the literal prefix |
+| API Key | this team's token from [2.9](#29-generate-the-event-stream-token) — **bare** |
 
-> ⚠️ **The `Bearer ` prefix goes inside the API Key value.** There is no separate prefix or
-> scheme field. If you store only the bare token you get `Authorization: <token>` and EDA
-> rejects it with a token mismatch. It must be a capital **B** and exactly **one space**.
+> ⚠️ **Enter the token bare. Do not prefix it with `Bearer `.** The AAP side uses the
+> `ServiceNow Event Stream` credential type with `auth_type: token` and
+> `http_header_key: Authorization`, which compares the incoming header value against the stored token
+> **verbatim**. ServiceNow sends this field exactly as entered, so a prefix makes it not match:
+>
+> | API Key value here | Header sent | Result |
+> |---|---|---|
+> | `<token>` | `Authorization: <token>` | ✅ matches |
+> | `Bearer <token>` | `Authorization: Bearer <token>` | ❌ 401/403 |
+>
+> There **is** a separate **API Key Prefix** field on the credential form. **Leave it empty.** That
+> field is the right place for a scheme when a target needs one — never type `Bearer ` into the API
+> Key value itself.
+>
+> Verified 2026-09-29 against the live Team A and Team B streams, both configured bare with an empty
+> prefix field.
 
-**Step 4** — in your Action's REST step, select this alias. Done. The token never appears in
+**Step 2 — Connection & Credential Alias**
+
+*All → Connections & Credentials → Connection & Credential Aliases → New*
+
+- **Name:** `Ansible EDA <Team> Alias`
+- **Type:** Connection and Credential
+- **Connection type:** HTTP
+
+**Step 3 — HTTP(s) Connection — create it from the alias**
+
+Open the alias you just made and use its **HTTP Connections** related list → **New**.
+
+| Field | Value |
+|---|---|
+| Name | `Ansible EDA <Team> Connection` |
+| Connection alias | the alias above (pre-filled when created from the related list) |
+| Credential | `Ansible EDA <Team> Token` |
+| Connection URL | `https://<your-aap-host>` — **base URL only** |
+
+> ⚠️ **Create the connection from the alias's related list, not from the Connections table.**
+> Creating it standalone leaves **Connection alias** empty, or pointed at the wrong alias. The
+> symptom is `Unable to load connection with alias ID: <the alias's scoped name>` at run time — which
+> reads as though the alias is broken when in fact the alias resolved fine and has no usable child
+> connection.
+
+> **Base URL only.** The resource path — `eda-event-streams/api/eda/v1/external_event_stream/<uuid>/post/`
+> — is supplied by the REST step, built from the `Event Stream UUID` action input. That is what lets
+> one action serve every team.
+
+**Step 4** — the Action's REST step takes the alias as an **input**, not a fixed value, so you do not
+select it here. The flow passes the right team's alias per incident (§3.3). The token never appears in
 a script, a step output, or a flow execution log.
 
 ![Connection & Credential Alias](docs/images/40-sn-credential-alias.png)
 
-_Connection & Credential Alias_
+_Connection & Credential Alias. Single-team capture — yours will show one alias per team._
 
 ![HTTP(s) Connection pointing at the AAP host](docs/images/41-sn-http-connection.png)
 
-_HTTP(s) Connection pointing at the AAP host_
+_HTTP(s) Connection pointing at the AAP host, base URL only._
 
-![API Key credential — header Authorization, value 'Bearer <token>'](docs/images/42-sn-api-key-credential.png)
+![API Key credential — header Authorization, bare token](docs/images/42-sn-api-key-credential.png)
 
-_API Key credential — header Authorization, value 'Bearer <token>'_
+_API Key credential — header `Authorization`, value is the **bare token**._
 
 
 ### 3.2 Create the Action
 
 All → Process Automation → Flow Designer (or Workflow Studio) → New → Action
 
-> **Scope check:** set the Workflow Studio application to your scoped app first. One action serves
-> every team — the team-specific values arrive as the four inputs below.
+> **Scope check:** set the Workflow Studio application to your scoped app first.
+>
+> **Build one action, not one per team.** The team-specific values arrive as the four inputs below,
+> which is what makes a single action serve every team.
 
 **Action inputs:**
 
@@ -983,9 +1039,9 @@ endpoint per flow. See [Dynamic team routing](docs/servicenow-dynamic-team-routi
 > by the alias's *scoped name*, which reads like the connection record is missing and sends you
 > auditing `sys_alias` records that are fine.
 
-![Action inputs — Incident Record](docs/images/50-sn-action-inputs.png)
+![All four action inputs](docs/images/72-sn-action-inputs-four.png)
 
-_Action inputs — Incident Record_
+_All four action inputs. `50-sn-action-inputs.png` shows the older single-input version._
 
 ![Script step output variables (must be declared)](docs/images/51-sn-script-step-outputs.png)
 
@@ -993,15 +1049,18 @@ _Script step output variables (must be declared)_
 
 ![REST step using the connection alias](docs/images/52-sn-rest-step.png)
 
-_REST step using the connection alias_
+_REST step using the connection alias. **Single-team capture:** it shows a fixed alias and a literal
+UUID in the resource path. Yours should show the `Connection Alias` pill and the `Event Stream UUID`
+pill instead._
 
 ![Result script step output variables](docs/images/53-sn-result-script-outputs.png)
 
 _Result script step output variables_
 
-![Action outputs mapped from step pills](docs/images/54-sn-action-outputs.png)
+![Action outputs mapped from step pills](docs/images/77-sn-action-outputs.png)
 
-_Action outputs mapped from step pills_
+_Action outputs. `Payload` comes from **Build EDA Payload** (step 1) — the only step that assigns it —
+while the rest come from Process Response. `54-sn-action-outputs.png` shows the older wiring._
 
 
 The action has three steps plus error evaluation. Names used here match the working
@@ -1152,11 +1211,29 @@ the script reads both spellings._
 
 | Field | Value |
 |---|---|
-| Connection | **Use Connection Alias** → `EDA Event Stream` |
-| Resource path | `/eda-event-streams/api/eda/v1/external_event_stream/<uuid>/post/` |
+| Connection | **Use Connection Alias** |
+| Connection Alias | the **`Connection Alias` action-input pill** — not a fixed alias |
+| Base URL | leave empty — it comes from the connection record |
+| Build Request | `Manually` |
+| Resource path | `eda-event-streams/api/eda/v1/external_event_stream/` + the **`Event Stream UUID` pill** + `/post/` |
 | HTTP method | POST |
 | Header | `Content-Type: application/json` |
+| Request type | `Text` |
 | Request body | the `payload` pill from Step 1 |
+| **If this step fails** | **`Don't stop the action and go to the next step`** |
+
+> ⚠️ **`If this step fails` must be "don't stop".** It is what lets Step 3 run after a failed POST,
+> read the status code, and report `success = false` through the action's outputs. Leave it on the
+> default and a non-2xx aborts the action instead, so the flow's `If Successful` never evaluates and
+> the incident gets no work note explaining why.
+
+**Both team-specific values are pills, and that is the whole trick.** Hardcoding the alias or the
+UUID here would tie the action to one team and you would need one action per team. Because both are
+inputs, one action serves every team and the flow decides which team's values to pass.
+
+Build the resource path by typing the literal prefix, dragging the `Event Stream UUID` pill in, then
+typing `/post/` after it. Note there is **no leading slash** — the base URL from the connection
+supplies it.
 
 The `Authorization` header comes from the alias — do not add it by hand.
 
@@ -1216,24 +1293,57 @@ All → Process Automation → Flow Designer → New → Flow
 
 **Trigger:** Created → Incident
 
-Add a condition so you don't fire on every incident. Either works:
+Two conditions, and the second one matters:
 
-- `Caller` is `Event Management` (useful with Event Management demo data)
-- `Priority` is one of `1 - Critical`, `2 - High`
+- `Caller` **is** `Event Management` — keeps demo and human-raised tickets out of the flow
+- `Assignment group` **is not empty** — the group is what the route lookup keys on, so an incident
+  without one can never route. Filtering here means the flow never starts for those, rather than
+  starting and failing
 
-**Actions** — the working flow has five steps plus an error handler:
+**Actions** — six steps plus an error handler:
 
 | # | Step | Detail |
 |---|---|---|
-| 1 | **Action:** `Send Incident to Ansible EDA` | Input: drag `Trigger → Incident Record` into `Incident Record` |
-| 2 | **Flow Logic → If** `Successful` | Drag the action's `Success` pill, condition `is true` |
-| 3 | **then → Update Incident Record** | Record: `Trigger → Incident Record`, Table: Incident. Work notes: success message with the `HTTP Status` pill. State: `In Progress` |
-| 4 | **Flow Logic → End Flow** | Sits inside the `then` branch, so a success run stops here |
-| 5 | **Update Incident Record** | Reached only when the If was false. Work notes: failure message with the `Error Message` and `HTTP Status` pills |
-| 6 | **Error Handler → Update Incident Record** | Runs on an unexpected flow error. Work notes: a generic "contact the automation team" message |
+| 1 | **Action → Look Up Record** on `EDA Team Route` | Conditions: `Assignment group` **is** `Trigger → Incident Record → Assignment group` **AND** `Active` **is** `true`. Set *If multiple records are found* to **Return only the first record** |
+| 2 | **Action:** `Send Incident to Ansible EDA` | Four inputs — see the table below |
+| 3 | **Flow Logic → If** `Successful` | Drag the action's `Success` pill, condition `is true` |
+| 4 | **then → Update Incident Record** | Record: `Trigger → Incident Record`, Table: Incident. Work notes: success message with the `HTTP Status` pill. State: `In Progress` |
+| 5 | **Flow Logic → End Flow** | Sits inside the `then` branch, so a success run stops here |
+| 6 | **Update Incident Record** | Reached only when the If was false. Work notes: failure message with the `Error Message` and `HTTP Status` pills |
+| — | **Error Handler → Update Incident Record** | Runs on an unexpected flow error, including a route lookup that found nothing. Work notes: a generic "contact the automation team" message |
 
-There is no explicit `Else`. Step 4's **End Flow** inside the `then` branch is what makes
-step 5 behave as the failure path — a successful run never reaches it.
+Step 2's inputs — three of the four come from step 1's record:
+
+| Action input | Pill |
+|---|---|
+| Incident Record | `Trigger → Record Created → Incident Record` |
+| Team Code | `1 → EDA Team Route Record → Team code` |
+| Event Stream UUID | `1 → EDA Team Route Record → Event stream UUID` |
+| Connection Alias | `1 → EDA Team Route Record → Connection alias` |
+
+> ⚠️ **Use the singular `Look Up Record`, and feed Connection Alias the bare pill.**
+>
+> `Look Up Record` returns a **Record**; `Look Up Records` returns an **Array** and would need a
+> `For Each Item` loop. With one active route row per group there is nothing to iterate, so the
+> singular action is correct and there is **no loop** in this flow.
+>
+> Do **not** dot-walk Connection Alias to `→ Sys ID`. The REST step's field wants the reference
+> object; the dot-walked form fails with `Unable to load connection with alias ID:` followed by the
+> alias's *name*, which reads like the connection record is missing.
+
+> **What happens when no route row matches.** This flow relies on the **Error Handler**: step 1
+> errors, and the handler writes a work note. That is a valid design and it is what the screenshots
+> show. The alternative is to check *Don't fail on error* on step 1 and add an `If` on
+> `EDA Team Route Record → Sys ID` **is not empty**, which distinguishes "nobody configured a route"
+> from "the lookup itself broke."
+>
+> Either way, **gate on a scalar field, never on the record or list pill itself.** Comparing a Record
+> or `Records` pill to *empty* is a string comparison that is always false, so the branch silently
+> never fires. On the plural action the equivalent gate is `Count > 0`. See
+> [Dynamic team routing](docs/servicenow-dynamic-team-routing.md) for both shapes.
+
+There is no explicit `Else`. Step 5's **End Flow** inside the `then` branch is what makes
+step 6 behave as the failure path — a successful run never reaches it.
 
 Optional: add **Log** steps (Info on success, Error on failure) if you want the outcome in
 the system log as well as the work notes.
@@ -1244,9 +1354,11 @@ the system log as well as the work notes.
 
 _Flow trigger — Created on Incident with a condition_
 
-![Action step with the Incident Record dragged in](docs/images/61-sn-flow-action-input.png)
+![The flow's four action inputs](docs/images/76-sn-flow-action-pills.png)
 
-_Action step with the Incident Record dragged in_
+_The flow's four action inputs. Team Code, Event Stream UUID and Connection alias all come from
+step 1's record, and Connection alias is the **bare** reference pill. `61-sn-flow-action-input.png`
+shows the older single-input version._
 
 ![If condition on the action's Success output](docs/images/62-sn-flow-if-success.png)
 
@@ -1259,10 +1371,6 @@ _Then → Update Record with work notes_
 ![Log step, Info level](docs/images/64-sn-flow-log-info.png)
 
 _Log step, Info level_
-
-![Else branch — update record and log the error](docs/images/65-sn-flow-else.png)
-
-_Else branch — update record and log the error_
 
 ![Full flow with the error handler expanded](docs/images/66-sn-flow-error-handler.png)
 
@@ -1330,7 +1438,7 @@ These are not ServiceNow fields. They exist only to let a rulebook decide *wheth
 before the playbook ever sees the payload.
 
 > **Which producers this applies to.** The four keys are the contract for the **multi-tenant**
-> build — the Team A / Team B streams in [Part 8](#part-8--multi-organization-event-stream-topology).
+> build — the Team A / Team B streams in [Part 8](#part-8--why-the-topology-is-this-way).
 > Set all four on every event sent to those streams.
 >
 > The single-team reference script in [3.2](#32-create-the-action) predates this contract and
@@ -1504,7 +1612,7 @@ use a disposable ticket.
 ```bash
 curl -sk -X POST -w '\nHTTP:%{http_code}\n' \
   -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer YOUR_TOKEN' \
+  -H 'Authorization: YOUR_TOKEN' \
   'https://<your-aap-host>/eda-event-streams/api/eda/v1/external_event_stream/<uuid>/post/' \
   -d '{"event_type":"incident_created","incident_number":"CURLTEST","short_description":"test","priority":"3","cmdb_ci":"host01","state":"New","assigned_to":"admin","category":"Inquiry","sys_id":"0000test"}'
 ```
@@ -1513,7 +1621,7 @@ curl -sk -X POST -w '\nHTTP:%{http_code}\n' \
 |---|---|
 | `200` | token and URL are correct |
 | `400 Authorization header is missing` | no header sent |
-| `403` | token mismatch — wrong value, or missing/malformed `Bearer ` prefix |
+| `403` | token mismatch — the header value is not byte-identical to the stored token |
 | `404` | wrong URL |
 
 Send **all** the fields the rulebook maps. A minimal two-field payload matches the rule and
@@ -1597,9 +1705,15 @@ dispatcherd.brokers.pg_notify  Set up pg_notify listening on channel 'default'
 
 ### `403` / token mismatch from the event stream
 
-- The `Bearer ` prefix is missing from the API Key value, has a lowercase `b`, or has two
-  spaces
-- The token in ServiceNow and the token in the AAP credential differ
+- The token in ServiceNow and the token in the AAP credential differ. They must be
+  **byte-identical** — the `ServiceNow Event Stream` credential type compares the header value
+  verbatim
+- Trailing whitespace or a newline from the paste. `openssl rand -hex 32` is always **64
+  characters**; check the length on both sides before anything else
+- The API Key value has a prefix in front of it. It must be the **bare token** — no `Bearer `, no
+  scheme, nothing
+- The **HTTP header key** on the AAP credential is not `Authorization`
+- You are posting to the other team's stream — each stream accepts only its own token
 
 > ⚠️ The event stream's `events_received` counter increments even for **rejected** requests.
 > A rising counter is not proof of success — check the HTTP status.
@@ -1675,8 +1789,8 @@ problem as the sync failure; see the CR patch in
 ### Rotating the event stream token
 
 1. Generate a new value: `openssl rand -hex 32`
-2. Update the **AAP** `Event Stream Token` credential first
-3. Update the **ServiceNow** API Key credential to `Bearer <new-token>`
+2. Update that team's **AAP** event stream credential first
+3. Update that team's **ServiceNow** API Key credential to the new token, **bare**
 
 Posts between the two saves will fail with 403. Do it during a quiet window and verify
 afterwards.
@@ -1696,7 +1810,7 @@ The ServiceNow side (action, flow, alias, credential) survives — only the URL 
 change.
 
 ---
-## Part 8 — Multi-organization event stream topology
+## Part 8 — Why the topology is this way
 
 > Part 7 was already "Token rotation and maintenance," so this is **Part 8**, not Part 7.
 >
@@ -1783,27 +1897,18 @@ the fan-out finding in 8.2, the token-isolation reasoning in 8.5, and the org-sc
 8.4 — not because any vendor documentation says to do it. Present it that way if you write this
 up anywhere else: "our decision, for these reasons," never "Red Hat's recommended pattern."
 
-### 8.4 What has to be duplicated per organization, and what doesn't
+### 8.4 What has to be duplicated per organization
 
-| Object | Scope | Consequence for a second team |
-|---|---|---|
-| Credentials (ServiceNow PDI, AAP Controller, Event Stream Token, Registry) | Per organization | Team A and Team B each need their own copy, even where the values would be identical |
-| Projects (both the controller "EDA ServiceNow" project and the EDA "Ansible EDA Test" project) | Per organization | Each org syncs its own project, independently, from the same or a different Git ref |
-| Job templates | Per organization | `Team A Incident Handler` and `Team B Incident Handler` are separate objects, matched by name from `job_args`/`run_job_template` — see the `name:` field in `rulebooks/team_a_rulebook.yml` and `rulebooks/team_b_rulebook.yml` |
-| Decision Environments | Per organization | Each org's activation references its own DE, even if it's the same container image |
-| Event streams | Per organization | The core of this section — see 8.1–8.3 |
-| Rulebook activations | Per organization | One activation pod per org, running that org's rulebook |
-| **Credential types** (the custom `ServiceNow` type from Part 1.1) | **Global** | Defined once. Every org's ServiceNow credential is an *instance* of this one type. The `host` input / `SN_HOST` injector is part of the type definition in [Part 1.1](#11-create-the-custom-servicenow-credential-type), so you add it **once**, globally — you do not redefine the type per org, you just re-save each org's own credential instance afterward. |
+Moved. The full classification — and the verified finding that org isolation is **asymmetric**
+(credentials rejected cross-org, inventories accepted) — now lives with the build steps it governs,
+at [2.14](#214-why-the-whole-part-repeats--the-scoping-rules).
 
-Today, only the `Default` organization exists in this sandbox. `Team A` and `Team B` do not
-exist as AAP organizations yet — but `rulebooks/team_a_rulebook.yml` and
-`rulebooks/team_b_rulebook.yml` already reference `organization: "Team A"` /
-`organization: "Team B"` and job templates named `Team A Incident Handler` /
-`Team B Incident Handler` that don't exist yet either. That's expected: those rulebooks are
-written for the multi-org state this section describes, ahead of the orgs being created. Until
-the orgs, credentials, projects, job templates, DEs, and streams in the table above all exist,
-activations built from those two rulebooks will fail to launch with a job-template-not-found
-error, not a routing error.
+The short version: **everything is per-organization except the credential type.** That is why Part 2
+repeats in full for each team and Part 1 does not.
+
+Both `Team A` (org 2) and `Team B` (org 3) exist and every object in that classification is built —
+verified 2026-09-29, with jobs 38 and 41 routing and closing independently through
+`sn-team-a` and `sn-team-b`.
 
 ### 8.5 Why each stream needs its own token
 
@@ -1827,8 +1932,10 @@ goes stale: *"If the rulebook is modified after the source mapping has been crea
 Restart happens, the rulebook activation fails."* The API's own error text for this is
 **"Rulebook has changed since the sources were mapped. Please reattach event streams."**
 
-That means **every** rulebook edit — not just a first-time setup — requires this full cycle,
-per organization whose rulebook you touched:
+That means **every** rulebook edit — not just a first-time setup — requires the full
+push → sync → re-attach → restart cycle, per organization whose rulebook you touched. The
+step-by-step procedure is at [2.13](#213-the-change-cycle-for-any-rulebook-edit); the ordering below
+explains why each step is needed:
 
 1. Edit the rulebook file (e.g. `rulebooks/team_a_rulebook.yml`).
 2. Commit the change.
