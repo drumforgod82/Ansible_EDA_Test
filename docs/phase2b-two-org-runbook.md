@@ -18,6 +18,48 @@ vice versa.
 
 ---
 
+## Already built (verified via API, 2026-09-25)
+
+These objects exist. **Do not re-create them** — skip straight to the steps marked TODO.
+
+| Object | Team A | Team B | Status |
+|---|---|---|---|
+| Organization | `Team A` (id 2) | `Team B` (id 3) | ✅ created, propagated to controller **and** EDA |
+| Controller inventory | `Team A Inventory` (id 2) | `Team B Inventory` (id 3) | ✅ each with `localhost` / `ansible_connection: local` |
+| Decision environment | `DE Supported RHEL9 - Team A` (id 3) | `- Team B` (id 4) | ✅ no registry credential needed |
+| EDA project | `Ansible EDA Test - Team A` (id 2) | `- Team B` (id 3) | ✅ synced, `git_hash f696ef69` |
+| Controller project | `EDA ServiceNow - Team A` (id 9) | `- Team B` (id 10) | ✅ synced, rev `f696ef69` |
+| Job template | `Team A Incident Handler` (id 11) | `Team B Incident Handler` (id 12) | ✅ `ask_variables_on_launch: true`, **no credential attached yet** |
+| Credential type `ServiceNow` (id 33) | global | global | ✅ now has `host` input + `SN_HOST` injector |
+
+Rulebook IDs for Step 8, already discovered by each per-org project:
+
+- Team A → project `Ansible EDA Test - Team A`, rulebook **`team_a_rulebook.yml`** (id 7)
+- Team B → project `Ansible EDA Test - Team B`, rulebook **`team_b_rulebook.yml`** (id 12)
+
+Each per-org project discovers **all four** rulebooks (same repo), so pick the right file by
+hand — nothing filters the list for you.
+
+**Still TODO, all of it secret-bearing:** Step 1 (two tokens), Step 3 (both EDA credentials per
+team), the per-org `ServiceNow` controller credential, Step 4 (event streams), Step 8
+(activations + stream mapping).
+
+> **Org isolation is weaker than it looks — verified empirically, not assumed.** AAP enforces
+> organization scoping *inconsistently* between object types:
+>
+> | Object | Cross-org reuse | Evidence |
+> |---|---|---|
+> | Credential | **Rejected** | `POST .../job_templates/11/credentials/ {"id":6}` → `HTTP 400 "Credential matching query does not exist."` |
+> | Inventory | **Allowed** | `PATCH .../job_templates/11/ {"inventory":1}` → `HTTP 200`, Team A's template happily used `Demo Inventory` from `Default` |
+>
+> So an organization is a hard boundary for secrets but a soft one for other objects. Do not
+> present "it's in a different org" as an isolation guarantee in the Centene design — the
+> guarantee holds for credentials specifically, which is the part that matters most, but it is
+> not a blanket property. Per-org inventories here are a deliberate hygiene choice, not
+> something AAP forced.
+
+---
+
 ## Dependency order
 
 Do these in this exact sequence. Each step needs an object the previous step created.
@@ -398,7 +440,7 @@ credential object keeps that isolation intentional rather than accidental.
 | Name | `Team A Incident Handler` — **must match the rulebook's `run_job_template.name` exactly** | `Team B Incident Handler` — same rule |
 | Organization | `Team A` | `Team B` |
 | Job type | Run | Run |
-| Inventory | `Demo Inventory` (must contain `localhost`) | (same) |
+| Inventory | `Team A Inventory` (contains `localhost` with `ansible_connection: local`) | `Team B Inventory` |
 | Project | `EDA ServiceNow - Team A` | `EDA ServiceNow - Team B` |
 | Playbook | `servicenow_incident_handler.yml` | (same) |
 | Execution environment | Default execution environment | (same) |
