@@ -174,7 +174,7 @@ several are now wrong — `50-sn-action-inputs.png` is captioned "Action inputs 
 when the action has four inputs, and the event-stream and activation shots show one of each.
 
 Capture these into `docs/images/` using the existing numbering convention, then replace the
-matching placeholder below. Naming: `7N-sn-routing-<what>.png` for ServiceNow, `8N-aap-<what>.png`
+matching placeholder below. Naming: `7N-sn-routing-<what>.png` for ServiceNow, `9N-aap-<what>.png`
 for AAP.
 
 | # | Filename | What to show | Section |
@@ -187,9 +187,9 @@ for AAP.
 | 6 | `75-sn-lookup-record-step.png` | The **Look Up Record** step — singular action, conditions, "Return only the first record" | §5.9 |
 | 7 | `76-sn-flow-action-pills.png` | The flow's four action-input pills, incl. the **bare** Connection alias pill | §5.9 |
 | 8 | `77-sn-action-outputs.png` | Action outputs, showing `payload` wired to **step 1** not step 3 | §6.2 |
-| 9 | `80-aap-two-event-streams.png` | Both event streams with per-team orgs. **Crop the UUID column.** | §4 |
-| 10 | `81-aap-two-activations.png` | Both activations running, each mapped to its own stream | §4 |
-| 11 | `82-aap-job-extra-vars.png` | A job's `extra_vars` showing `target_team` populated and `sn_close_incident: true` | §8 |
+| 9 | `91-aap-two-event-streams.png` | Both event streams with per-team orgs. **Crop the UUID column.** | §4 |
+| 10 | `92-aap-two-activations.png` | Both activations running, each mapped to its own stream | §4 |
+| 11 | `95-aap-job-extra-vars.png` | A job's `extra_vars` showing `target_team` populated and `sn_close_incident: true` | §8 |
 
 > ⚠️ **Two of these show secrets-adjacent data.** Crop or blur the **Event stream UUID** in #2 and
 > #9 — this repo is public, and a stream UUID plus the gateway hostname is the complete POST
@@ -198,8 +198,9 @@ for AAP.
 Placeholder syntax used below, so a missing image is obvious rather than silently absent:
 
 ```markdown
-<!-- SCREENSHOT: 73-sn-step1-input-vars.png - step 1's two input variables with pills mapped -->
-_Screenshot pending: step 1 input variables._
+![Step 1's two input variables, `Incident_record` and `team_code`, with the action's pills mapped into them](images/73-sn-step1-input-vars.png)
+
+_Step 1's two input variables, `Incident_record` and `team_code`, with the action's pills mapped into them._
 ```
 
 ---
@@ -230,12 +231,11 @@ security find-generic-password -a "$USER" -s sandbox-eda-team-a -w
 security find-generic-password -a "$USER" -s sandbox-eda-team-b -w
 ```
 
-> **Unresolved: `Bearer ` prefix or not.** `references/integration-and-secrets.md` says store
-> `Bearer <token>` with the prefix *inside* the API Key value, verified 2026-09-18 against an
-> AAP 2.7 event stream. But a direct `curl` on 2026-09-28 got **HTTP 200 with the bare token**, and
-> the `Bearer ` form was never tested. Both may be accepted. Start bare; if the POST returns 401,
-> add the prefix inside the credential value. Record which one works and fix whichever note is
-> wrong.
+> **Resolved 2026-09-29: store the token bare, with no `Bearer ` prefix.** The AAP event stream uses
+> the `ServiceNow Event Stream` credential type (`auth_type: token`, `http_header_key: Authorization`),
+> which compares the incoming header value against the stored token verbatim. ServiceNow's API Key
+> credential sends the field exactly as entered, so `Bearer <token>` would not match and returns 401.
+> Verified against the live Team A and Team B streams, which are configured bare and working.
 
 **Alias** — *Connection & Credential Aliases → New*: `Ansible EDA Team A Alias` /
 `Ansible EDA Team B Alias`, type **Connection and Credential**, connection type **HTTP**.
@@ -295,11 +295,13 @@ Rows:
 
 Substitute the real UUIDs from AAP (see §4) — they are not committed.
 
-<!-- SCREENSHOT: 70-sn-route-table-columns.png - the EDA Team Route table columns and types -->
-_Screenshot pending: the EDA Team Route table columns and types._
+![The `EDA Team Route` table — six columns and their types](images/70-sn-route-table-columns.png)
 
-<!-- SCREENSHOT: 71-sn-route-table-rows.png - the two route rows, UUID column cropped -->
-_Screenshot pending: the two route rows, UUID column cropped._
+_The `EDA Team Route` table — six columns and their types._
+
+![The two route rows](images/71-sn-route-table-rows.png)
+
+_The two route rows. Team code, assignment group, stream name and connection alias are visible; the Event stream UUID column is redacted because this repo is public._
 
 ### 5.4 Failure log table
 
@@ -332,8 +334,9 @@ Open **`Send Incident to Ansible EDA`** and declare four inputs:
 The `connection_alias` type matters: the REST step's Connection Alias field expects this type and
 must be fed the **bare pill**. See §5.7.
 
-<!-- SCREENSHOT: 72-sn-action-inputs-four.png - all four action inputs with their types -->
-_Screenshot pending: all four action inputs with their types._
+![All four action inputs](images/72-sn-action-inputs-four.png)
+
+_All four action inputs. This replaces the older `50-sn-action-inputs.png`, which showed only Incident Record._
 
 ### 5.6 Action step 1 — build payload (script)
 
@@ -355,8 +358,9 @@ _Screenshot pending: all four action inputs with their types._
 > Neither produces an error, and `'use strict'` does not catch either. §6.1 has the full account of
 > how this shipped an empty `target_team` for days.
 
-<!-- SCREENSHOT: 73-sn-step1-input-vars.png - step 1's Incident_record and team_code variables with pills mapped -->
-_Screenshot pending: step 1's Incident_record and team_code variables with pills mapped._
+![Step 1's two input variables, `Incident_record` and `team_code`, with the action's pills mapped into them](images/73-sn-step1-input-vars.png)
+
+_Step 1's two input variables, `Incident_record` and `team_code`, with the action's pills mapped into them._
 
 ### 5.7 Action step 2 — REST step
 
@@ -457,11 +461,13 @@ already the "no route" behaviour. Add an `If Count is 0` branch only if you want
 > greys out and nothing is clickable. That grey-out is not a permissions problem or a UI bug; it is
 > a type mismatch telling you the loop does not belong in this flow.
 
-<!-- SCREENSHOT: 75-sn-lookup-record-step.png - the Look Up Record step: singular action, conditions, return-first -->
-_Screenshot pending: the Look Up Record step: singular action, conditions, return-first._
+![The **Look Up Record** step — the singular action, with the assignment-group and Active conditions](images/75-sn-lookup-record-step.png)
 
-<!-- SCREENSHOT: 76-sn-flow-action-pills.png - the flow's four action-input pills, Connection alias as a bare pill -->
-_Screenshot pending: the flow's four action-input pills, Connection alias as a bare pill._
+_The **Look Up Record** step — the singular action, with the assignment-group and Active conditions._
+
+![The flow's four action inputs](images/76-sn-flow-action-pills.png)
+
+_The flow's four action inputs. Team Code, Event Stream UUID and Connection alias all come from step 1's record, and **Connection alias is the bare reference pill** — not dot-walked to Sys ID. Note there is no `For Each` loop._
 
 ### 5.10 Flow properties
 
@@ -719,6 +725,11 @@ Declare this step's input variables with these **exact names**, then map step 2'
 | `response_body` | step 2 → Response Body |
 | `rest_error_message` | step 2 → Error Message |
 
+![Step 3 input variables](images/74-sn-step3-input-vars.png)
+
+_Step 3's input variables and outputs. The inputs are lowercase — `status_code`,
+`response_body`, `rest_error_message` — matching what the script reads._
+
 Declare exactly four outputs — `success`, `http_status`, `response_body`, `error_message` — and no
 `payload` output. `rest_error_message` is deliberately *not* called `error_message`: that name is
 already taken by this step's **output**, and an input and output sharing a name in one step is how
@@ -739,6 +750,12 @@ these mismatches start.
 > and **an output that stays blank while its source input is visibly populated** in execution
 > details. Both mean a name mismatch, not an endpoint problem. The *Variable Name* column in
 > execution details shows the real declared name — read it there, not off the label.
+
+![Action outputs](images/77-sn-action-outputs.png)
+
+_Action outputs. `Payload` is wired to **Build EDA Payload** (step 1) — the only step that
+assigns it — while Success, HTTP Status, Error Message and Response Body come from Process
+Response._
 
 Also check the **action's own output wiring**: `payload` must come from **step 1's** Payload output.
 This script never assigns `outputs.payload`, so pointing the action's `payload` output at step 3
@@ -784,13 +801,19 @@ curl -sS -H "Authorization: Bearer $tok" "$gw/api/eda/v1/event-streams/?page_siz
   | python3 -m json.tool | grep -E '"name"|events_received'
 ```
 
+![Successful job extra_vars](images/95-aap-job-extra-vars.png)
+
+_A successful Team A job. `target_team: team-a`, `source_stream: sn-team-a` and
+`sn_close_incident: true` are populated, and the per-team credential, project and inventory
+are visible. A blank `target_team` here means step 1 is missing its `team_code` input (§6.1)._
+
 Expect `sn-team-a` to increment and `sn-team-b` to stay flat. Then repeat with **Team-B** and
 expect the mirror image — that is Experiment 1 (isolation).
 
 | Symptom | Most likely cause |
 |---|---|
 | No stream counter moves | Flow did not run — check the trigger condition and the Sys ID gate (§5.9) |
-| `EDA Publish Log` row with 401 | Credential value: try the `Bearer ` prefix (§5.2) |
+| `EDA Publish Log` row with 401 | Token mismatch. Compare lengths on both sides — 64 chars — and confirm the value is bare with no prefix (§5.2) |
 | `EDA Publish Log` row with 404 | `resource_path` pill resolved empty, or a stale UUID in the route row |
 | Counter moves, no job launches | Rulebook mismatch — compare `event_type` and `eda_event_stream_name` |
 | Both teams' rules fire on one event | Both activations mapped to the same stream — fan-out, not a queue |
@@ -809,9 +832,50 @@ No flow or action changes.
 
 ## 10. Making routing smarter later
 
-Today routing is "assignment group → team". Eventually you may want "P1 database incidents go to
-Team B regardless of group". There are three ways to get there. **Read all three before picking** —
-most people reach for the Decision Table when option 1 would have done the job.
+**Decide where the logic belongs before adding any.** There are two layers and they answer different
+questions:
+
+| Layer | Question it answers | How you extend it |
+|---|---|---|
+| **ServiceNow route table** | *Which team's stream does this incident go to?* | One row per team. That's it |
+| **The team's rulebook** | *What automation runs for this incident?* | Add rules with conditions |
+
+**A team needing different automation for different incidents is a rulebook change, not a routing
+change.** The payload already carries everything you would branch on — `priority`, `priority_value`,
+`state`, `urgency`, `impact`, `category`, `cmdb_ci`, `business_service`, `short_description` — so the
+rulebook can dispatch without ServiceNow knowing anything about it:
+
+```yaml
+  rules:
+    - name: Launch Team A critical handler
+      condition: >-
+        event.meta.eda_event_stream_name == "sn-team-a" and
+        event.payload.event_type == "servicenow.incident.created" and
+        event.payload.priority_value == "1"
+      action:
+        run_job_template:
+          name: "Team A Critical Incident Handler"
+          organization: "Team A"
+
+    - name: Launch Team A incident handler
+      condition: >-
+        event.meta.eda_event_stream_name == "sn-team-a" and
+        event.payload.event_type == "servicenow.incident.created" and
+        event.payload.priority_value != "1"
+      action:
+        run_job_template:
+          name: "Team A Incident Handler"
+          organization: "Team A"
+```
+
+That keeps ServiceNow at one row per team, puts the branching in a purpose-built rule engine, and
+means changes ship through Git and the normal
+[change cycle](../README.md#213-the-change-cycle-for-any-rulebook-edit) rather than through Flow Designer.
+
+**So keep the route table at one row per team.** The options below only apply to the genuinely rare
+case where **the team itself changes based on incident content** — "P1 database incidents go to Team B
+even though the group says Team A". If the destination team is stable and only the *work* differs, use
+rulebook rules and skip the rest of this section.
 
 Everything below replaces **flow step 1 only**. The action, the REST step, both scripts, and the
 log table never change.
@@ -830,28 +894,46 @@ exactly what you said you wanted to avoid. So it is not automatically the right 
 
 ---
 
-### Option 1 — More columns, wider lookup condition ★ recommended first
+### Option 1 — More columns, wider lookup condition
 
-**No script. No new concepts. Fifteen minutes.**
+**Simplest of the three if you need it. No script, no new concepts.**
 
-The `Look Up Record` step already has a full condition builder. To route on more than group, add
-columns to the route table and widen the condition.
+> **You probably do not need this.** It only helps when **one assignment group must route to more
+> than one destination** — say critical Team-A incidents going to a different stream than low-priority
+> ones. In the build described by this guide, the trigger filters on `Caller = Event Management` and
+> the lookup matches on assignment group alone, so one group maps to exactly one row and there is
+> nothing to widen. Adding Priority and Category columns then gives you fields that never change the
+> outcome. Skip to §9 unless multi-destination routing is an actual requirement.
 
-1. Open the `EDA Team Route` table, add columns for whatever you want to match on — for example
-   **Priority** (String, 40) and **Category** (String, 40). Leave them empty to mean "any".
-2. In the flow's **Look Up Record** step, add conditions:
+If it is a requirement:
+
+1. Add the columns you want to match on to `EDA Team Route` — for example **Priority** (String, 40)
+   and **Category** (String, 40). **Leave a column empty on a row to mean "any value"**.
+2. Add an **Order** column (Integer). This is **not optional** — see the warning below.
+3. In the flow's **Look Up Record** step, express each optional field as **two OR'd condition rows**,
+   not as a single "is one of":
 
    ```
-   Assignment group  is  Trigger → Incident → Assignment group
-   Active            is  true
-   Priority          is one of  (empty)  OR  Trigger → Incident → Priority
+   Assignment group  is          Trigger → Incident Record → Assignment group
+   AND  Active       is          true
+   AND ( Priority    is empty
+         OR Priority is          Trigger → Incident Record → Priority )
    ```
 
-3. Add an **Order** column (Integer) and sort the lookup by it ascending, so a specific row can win
-   over a general one.
+   Use the condition builder's **or** button to create the second row of the pair, and a condition
+   set to group it. The `is empty` row is what makes a blank column behave as a wildcard.
 
-Covers the large majority of "route on more than one thing" needs. Reach past it only when the
-logic genuinely needs OR-of-ANDs across many fields.
+4. Set **Order by** = `Order`, direction **a to z** (ascending), and keep *If multiple records are
+   found* on **Return only the first record**.
+
+> ⚠️ **With wildcards, more than one row matches — and `Order by` is the only tiebreaker.** A specific
+> row (`Priority = 1 - Critical`) and a catch-all row (`Priority` empty) both satisfy the condition for
+> a critical incident. *Return only the first record* then picks whichever the sort puts first, so
+> without an explicit `Order by` the winner is effectively arbitrary and will appear to change for no
+> reason. Give specific rows a **lower** Order number than general ones.
+
+Covers the large majority of genuine "route on more than one thing" needs. Reach past it only when the
+logic needs OR-of-ANDs across many fields.
 
 ---
 
@@ -1079,7 +1161,8 @@ Store the decision table's sys_id in the scoped property
 
 | | Script? | Who edits rules | Best when |
 |---|---|---|---|
-| **1. Wider lookup condition** | none | you, in the flow | routing is a handful of field matches — **start here** |
+| **0. Rulebook rules** | none in ServiceNow | the team, in Git | **the destination team is stable and only the automation differs — this is the right answer almost always** |
+| **1. Wider lookup condition** | none | you, in the flow | the **team** must change based on a handful of incident fields |
 | **2. Conditions column** | one small step | anyone, per table row | many rules, each independently editable |
 | **3. Decision Table** | one step + unverified API | process owners, in Decision Builder | logic is governed, audited, or owned outside the platform team |
 
