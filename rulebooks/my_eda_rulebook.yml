@@ -1,4 +1,13 @@
 ---
+# DEPRECATED - single-stream, single-team original. Superseded by team_a_rulebook.yml and
+# team_b_rulebook.yml plus the EDA Team Route table (docs/servicenow-dynamic-team-routing.md).
+#
+# It expects the old `incident_created` event_type and cannot match the current payload, so it
+# matches nothing even if activated. Activation 1 (ServiceNow Event Stream Rulebook) is stopped.
+#
+# NOT deleted yet because README Parts 2 and 4 still walk a first-time reader through the
+# single-team build using this file. Delete it together with that rewrite, not before, or the
+# README's own instructions break. Order when you do: activation 1 -> stream 1 -> credential 4.
 - name: ServiceNow Incident Automation - Simple Test
   hosts: all
   sources:

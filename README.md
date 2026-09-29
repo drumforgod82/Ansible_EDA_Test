@@ -26,7 +26,6 @@ click, what to type, and how to prove it worked.
 11. [Part 7 — Token rotation and maintenance](#part-7--token-rotation-and-maintenance)
 12. [Part 8 — Multi-organization event stream topology](#part-8--multi-organization-event-stream-topology)
 13. [Appendix A — OAuth 2.0 direct job launch (alternative)](#appendix-a--oauth-20-direct-job-launch-alternative)
-14. [Appendix B — Legacy Business Rule (do not use)](#appendix-b--legacy-business-rule-do-not-use)
 
 ### Companion guides in `docs/`
 
@@ -1642,8 +1641,8 @@ behavior that Red Hat has never committed to.
 >
 > This appendix is kept for two reasons: it is a legitimate alternative if you ever want
 > ServiceNow to launch a job template directly without EDA, and the OAuth application setup in
-> A.1 is a useful reference. **If you are following this guide for the first time, skip to
-> [Appendix B](#appendix-b--legacy-business-rule-do-not-use) or stop here.**
+> A.1 is a useful reference. **If you are following this guide for the first time, stop here —
+> nothing below is needed for the event-stream architecture.**
 
 Use this if you want ServiceNow to call a job template **directly**, with no EDA. Payloads
 here **must** be wrapped in `extra_vars`.
@@ -2028,66 +2027,6 @@ an active flag. Replace `<your-scope>` with your real scope prefix.
 
 **Action output variables:** `success` (True/False), `job_id` (String),
 `http_status` (String), `error_message` (String). Save and **Publish**.
-
----
-
-## Appendix B — Legacy Business Rule (do not use)
-
-Kept for reference only. Use Flow Designer / Workflow Studio instead — it is supported,
-debuggable through Flow Executions, and doesn't put integration logic in a table trigger.
-
-<details>
-<summary>Business Rule approach (superseded)</summary>
-
-**Table:** Incident · **Active:** true · **Advanced:** true
-**When:** After (async if in a scoped application) · **Insert:** true · no filter conditions
-
-```javascript
-(function executeRule(current, previous /*null when async*/) {
-
-    try {
-        var request = new sn_ws.RESTMessageV2('Ansible AAP Job Template Webhook', 'Default POST');
-
-        var payload = {
-            extra_vars: {
-                incident_number:   current.number.toString(),
-                short_description: current.short_description.toString(),
-                priority:          current.priority.getDisplayValue(),
-                cmdb_ci:           current.cmdb_ci.getDisplayValue(),
-                sys_id:            current.sys_id.toString(),
-                state:             current.state.getDisplayValue(),
-                assigned_to:       current.assigned_to.getDisplayValue(),
-                category:          current.category.toString(),
-                urgency:           current.urgency.getDisplayValue(),
-                impact:            current.impact.getDisplayValue()
-            }
-        };
-
-        request.setRequestBody(JSON.stringify(payload));
-
-        var response     = request.execute();
-        var httpStatus   = response.getStatusCode();
-        var responseBody = response.getBody();
-
-        if (httpStatus == 201) {
-            var jobData = JSON.parse(responseBody);
-            gs.info('SUCCESS: AAP job launched for ' + current.number + ', job ' + jobData.id);
-            current.work_notes = 'Ansible automation triggered. Job ID: ' + jobData.id;
-            current.update();
-        } else if (httpStatus == 200) {
-            gs.info('SUCCESS: AAP job launched for ' + current.number);
-        } else {
-            gs.error('FAILED: status ' + httpStatus + ', response: ' + responseBody);
-        }
-
-    } catch (ex) {
-        gs.error('ERROR: AAP Business Rule exception for ' + current.number + ': ' + ex.getMessage());
-    }
-
-})(current, previous);
-```
-
-</details>
 
 ---
 

@@ -167,6 +167,43 @@ So the table carries both: `team_code` (stable key) and `assignment_group` (swap
 
 ---
 
+## Screenshots to capture
+
+This guide has none yet. The README's existing images are all from the **single-team** build and
+several are now wrong — `50-sn-action-inputs.png` is captioned "Action inputs — Incident Record"
+when the action has four inputs, and the event-stream and activation shots show one of each.
+
+Capture these into `docs/images/` using the existing numbering convention, then replace the
+matching placeholder below. Naming: `7N-sn-routing-<what>.png` for ServiceNow, `8N-aap-<what>.png`
+for AAP.
+
+| # | Filename | What to show | Section |
+|---|---|---|---|
+| 1 | `70-sn-route-table-columns.png` | `EDA Team Route` table — the six columns and their types | §5.3 |
+| 2 | `71-sn-route-table-rows.png` | The two route rows. **Blur or crop the Event stream UUID column.** | §5.3 |
+| 3 | `72-sn-action-inputs-four.png` | All four action inputs with types — replaces the stale `50-sn-action-inputs.png` | §5.5 |
+| 4 | `73-sn-step1-input-vars.png` | Step 1's two input variables, `Incident_record` and `team_code`, with their pills mapped | §5.6 |
+| 5 | `74-sn-step3-input-vars.png` | Step 3's three lowercase input variables and four outputs | §6.2 |
+| 6 | `75-sn-lookup-record-step.png` | The **Look Up Record** step — singular action, conditions, "Return only the first record" | §5.9 |
+| 7 | `76-sn-flow-action-pills.png` | The flow's four action-input pills, incl. the **bare** Connection alias pill | §5.9 |
+| 8 | `77-sn-action-outputs.png` | Action outputs, showing `payload` wired to **step 1** not step 3 | §6.2 |
+| 9 | `80-aap-two-event-streams.png` | Both event streams with per-team orgs. **Crop the UUID column.** | §4 |
+| 10 | `81-aap-two-activations.png` | Both activations running, each mapped to its own stream | §4 |
+| 11 | `82-aap-job-extra-vars.png` | A job's `extra_vars` showing `target_team` populated and `sn_close_incident: true` | §8 |
+
+> ⚠️ **Two of these show secrets-adjacent data.** Crop or blur the **Event stream UUID** in #2 and
+> #9 — this repo is public, and a stream UUID plus the gateway hostname is the complete POST
+> endpoint. The UUIDs are deliberately redacted from the text for the same reason (§4).
+
+Placeholder syntax used below, so a missing image is obvious rather than silently absent:
+
+```markdown
+<!-- SCREENSHOT: 73-sn-step1-input-vars.png - step 1's two input variables with pills mapped -->
+_Screenshot pending: step 1 input variables._
+```
+
+---
+
 ## 5. Build steps
 
 ### 5.1 Two groups
@@ -258,6 +295,12 @@ Rows:
 
 Substitute the real UUIDs from AAP (see §4) — they are not committed.
 
+<!-- SCREENSHOT: 70-sn-route-table-columns.png - the EDA Team Route table columns and types -->
+_Screenshot pending: the EDA Team Route table columns and types._
+
+<!-- SCREENSHOT: 71-sn-route-table-rows.png - the two route rows, UUID column cropped -->
+_Screenshot pending: the two route rows, UUID column cropped._
+
 ### 5.4 Failure log table
 
 Label **`EDA Publish Log`** → `x_661661_james_tes_eda_publish_log`
@@ -284,29 +327,36 @@ Open **`Send Incident to Ansible EDA`** and declare four inputs:
 | `incident_record` | Reference → Incident |
 | `team_code` | String |
 | `event_stream_uuid` | String |
-| `connection_alias` | Reference → `sys_alias` |
+| `connection_alias` | **Connection & Credential Aliases** (not a plain `sys_alias` reference) |
+
+The `connection_alias` type matters: the REST step's Connection Alias field expects this type and
+must be fed the **bare pill**. See §5.7.
+
+<!-- SCREENSHOT: 72-sn-action-inputs-four.png - all four action inputs with their types -->
+_Screenshot pending: all four action inputs with their types._
 
 ### 5.6 Action step 1 — build payload (script)
 
-See §6.1. Outputs: `payload`, `is_valid`, `incident_number`, `error_message`.
+1. Add a **Script** step named `Build EDA Payload`.
+2. Declare **two input variables**. The **Name** must match exactly — ServiceNow auto-fills it from
+   the Label, so check it before saving:
 
-> **Two separate wiring steps, and both are easy to miss.**
->
-> **1. Declare the step's input.** A script step has its own input variables, distinct from the
-> action's inputs. This step already declares one called **`Incident_record`** — capital I. Script
-> input names are **case-sensitive**, so `inputs.incident_record` and `inputs.Incident_record` are
-> different variables. §6.1 reads both.
->
-> **2. Map the action input into it.** Declaring the variable is not enough — you must drag the
-> action's **Incident Record** pill into the step's `Incident_record` field. An unmapped input is
-> simply empty at run time; there is no warning.
->
-> Symptom of either mistake: `No incident record supplied`. The §6.1 guard now lists the input names
-> it actually received, which distinguishes them — a missing name means mismatch, a name reading
-> `empty` means unmapped.
->
-> The same applies to step 3's `status_code` and `response_body`, and to the §10 option 2 script.
-> After pasting any script, check the step's input list against the variable names the script reads.
+   | Name | Type | Drag this pill into it |
+   |---|---|---|
+   | `Incident_record` | Reference → Incident | action input **Incident Record** |
+   | `team_code` | String | action input **Team Code** |
+
+3. Declare four **output variables**: `payload`, `is_valid`, `incident_number`, `error_message`.
+4. Paste the script from §6.1.
+5. Publish the action, then confirm `target_team` is populated in AAP's job `extra_vars`.
+
+> **Declaring a variable and mapping a pill into it are two separate actions.** Miss the mapping and
+> the input is empty at run time with no warning. Miss the name and the script reads `undefined`.
+> Neither produces an error, and `'use strict'` does not catch either. §6.1 has the full account of
+> how this shipped an empty `target_team` for days.
+
+<!-- SCREENSHOT: 73-sn-step1-input-vars.png - step 1's Incident_record and team_code variables with pills mapped -->
+_Screenshot pending: step 1's Incident_record and team_code variables with pills mapped._
 
 ### 5.7 Action step 2 — REST step
 
@@ -407,6 +457,12 @@ already the "no route" behaviour. Add an `If Count is 0` branch only if you want
 > greys out and nothing is clickable. That grey-out is not a permissions problem or a UI bug; it is
 > a type mismatch telling you the loop does not belong in this flow.
 
+<!-- SCREENSHOT: 75-sn-lookup-record-step.png - the Look Up Record step: singular action, conditions, return-first -->
+_Screenshot pending: the Look Up Record step: singular action, conditions, return-first._
+
+<!-- SCREENSHOT: 76-sn-flow-action-pills.png - the flow's four action-input pills, Connection alias as a bare pill -->
+_Screenshot pending: the flow's four action-input pills, Connection alias as a bare pill._
+
 ### 5.10 Flow properties
 
 **⋮ → Flow properties → Run as: System user.**
@@ -437,6 +493,32 @@ Both are ES5, IIFE-wrapped, `'use strict'`, every output initialised before the 
 every failure logged with a prefix and thrown so the action's error path fires.
 
 ### 6.1 Step 1 — build payload
+
+Declare **two** input variables on this step, with these exact names:
+
+| Declared variable name | Type | Mapped from |
+|---|---|---|
+| `Incident_record` | Reference → Incident | action input **Incident Record** |
+| `team_code` | String | action input **Team Code** |
+
+> **An action input is not visible to a step's script.** Each step is its own scope: `inputs.*`
+> resolves only against variables declared *on that step*. Forwarding an action input takes two
+> separate actions — declare the step variable, then map the action's pill into it. Miss either and
+> the value is silently `undefined`.
+>
+> `team_code` was missing here until 2026-09-29. The action received `team-b` correctly — it was
+> visible in the execution details — but it was never handed down to this script, so
+> `inputs.team_code` was `undefined`, `cleanFieldValue` returned `''`, and **every payload shipped
+> with `target_team` empty**. Nothing errored. Routing still worked, because routing is carried by
+> the event stream UUID, not by `target_team` — so the only symptom was a blank field arriving in
+> AAP's `extra_vars`, which all three rulebooks read
+> (`target_team: "{{ event.payload.target_team | default('') }}"`).
+>
+> Fixed and verified on INC0010017 (AAP job 38): `target_team = team-b`.
+>
+> `Incident_record` keeps its capital `I` because that is how it was originally created; the script
+> reads `inputs.incident_record || inputs.Incident_record` to tolerate either. Do not rely on that
+> tolerance for new inputs — match the name exactly.
 
 ```javascript
 (function execute(inputs, outputs) {
