@@ -1,7 +1,14 @@
 # Screenshots
 
-These are the screenshots referenced by the main [README](../../README.md), in the order they
-appear. All of them are present.
+Screenshots referenced by the main [README](../../README.md) and by
+[Dynamic team routing](../servicenow-dynamic-team-routing.md).
+
+**`50-sn-action-inputs.png` is superseded** by `72-sn-action-inputs-four.png` — it shows only the
+Incident Record input, from before the action took four. Kept only because Part 3 still references it.
+
+**Redaction:** `71-sn-route-table-rows.png` and `95-aap-job-extra-vars.png` have the Event stream
+UUID and record sys_ids masked. This repo is public and the UUIDs are deliberately absent from the
+text, so keep them masked in any replacement capture.
 
 | File | Shows |
 |---|---|
@@ -48,3 +55,20 @@ appear. All of them are present.
   hostnames, and internal email addresses. A screenshot pushed to a public repo stays public
   in git history even after you delete the file.
 - Keep files under roughly 500 KB.
+
+## Multi-team routing (added 2026-09-29)
+
+| File | Shows |
+|---|---|
+| `70-sn-route-table-columns.png` | `EDA Team Route` table — six columns and their types |
+| `71-sn-route-table-rows.png` | The two route rows, Event stream UUID column redacted |
+| `72-sn-action-inputs-four.png` | All four action inputs — supersedes `50-sn-action-inputs.png` |
+| `73-sn-step1-input-vars.png` | Step 1's `Incident_record` and `team_code` input variables with pills mapped |
+| `74-sn-step3-input-vars.png` | Step 3's lowercase inputs (`status_code`, `response_body`, `rest_error_message`) and outputs |
+| `75-sn-lookup-record-step.png` | The singular **Look Up Record** step with its conditions |
+| `76-sn-flow-action-pills.png` | The flow's four action inputs, Connection alias as a **bare** reference pill, no For Each loop |
+| `77-sn-action-outputs.png` | Action outputs — `Payload` wired to step 1, not step 3 |
+| `90-aap-two-organizations.png` | Both AAP organizations |
+| `91-aap-two-event-streams.png` | `sn-team-a` and `sn-team-b`, each in its own org with its own credential |
+| `92-aap-two-activations.png` | Both activations running, each mapped to its own stream |
+| `95-aap-job-extra-vars.png` | A successful Team A job with `target_team`, `source_stream` and `sn_close_incident` populated |

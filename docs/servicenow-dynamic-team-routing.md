@@ -174,7 +174,7 @@ several are now wrong — `50-sn-action-inputs.png` is captioned "Action inputs 
 when the action has four inputs, and the event-stream and activation shots show one of each.
 
 Capture these into `docs/images/` using the existing numbering convention, then replace the
-matching placeholder below. Naming: `7N-sn-routing-<what>.png` for ServiceNow, `8N-aap-<what>.png`
+matching placeholder below. Naming: `7N-sn-routing-<what>.png` for ServiceNow, `9N-aap-<what>.png`
 for AAP.
 
 | # | Filename | What to show | Section |
@@ -187,9 +187,9 @@ for AAP.
 | 6 | `75-sn-lookup-record-step.png` | The **Look Up Record** step — singular action, conditions, "Return only the first record" | §5.9 |
 | 7 | `76-sn-flow-action-pills.png` | The flow's four action-input pills, incl. the **bare** Connection alias pill | §5.9 |
 | 8 | `77-sn-action-outputs.png` | Action outputs, showing `payload` wired to **step 1** not step 3 | §6.2 |
-| 9 | `80-aap-two-event-streams.png` | Both event streams with per-team orgs. **Crop the UUID column.** | §4 |
-| 10 | `81-aap-two-activations.png` | Both activations running, each mapped to its own stream | §4 |
-| 11 | `82-aap-job-extra-vars.png` | A job's `extra_vars` showing `target_team` populated and `sn_close_incident: true` | §8 |
+| 9 | `91-aap-two-event-streams.png` | Both event streams with per-team orgs. **Crop the UUID column.** | §4 |
+| 10 | `92-aap-two-activations.png` | Both activations running, each mapped to its own stream | §4 |
+| 11 | `95-aap-job-extra-vars.png` | A job's `extra_vars` showing `target_team` populated and `sn_close_incident: true` | §8 |
 
 > ⚠️ **Two of these show secrets-adjacent data.** Crop or blur the **Event stream UUID** in #2 and
 > #9 — this repo is public, and a stream UUID plus the gateway hostname is the complete POST
@@ -198,8 +198,9 @@ for AAP.
 Placeholder syntax used below, so a missing image is obvious rather than silently absent:
 
 ```markdown
-<!-- SCREENSHOT: 73-sn-step1-input-vars.png - step 1's two input variables with pills mapped -->
-_Screenshot pending: step 1 input variables._
+![Step 1's two input variables, `Incident_record` and `team_code`, with the action's pills mapped into them](images/73-sn-step1-input-vars.png)
+
+_Step 1's two input variables, `Incident_record` and `team_code`, with the action's pills mapped into them._
 ```
 
 ---
@@ -295,11 +296,13 @@ Rows:
 
 Substitute the real UUIDs from AAP (see §4) — they are not committed.
 
-<!-- SCREENSHOT: 70-sn-route-table-columns.png - the EDA Team Route table columns and types -->
-_Screenshot pending: the EDA Team Route table columns and types._
+![The `EDA Team Route` table — six columns and their types](images/70-sn-route-table-columns.png)
 
-<!-- SCREENSHOT: 71-sn-route-table-rows.png - the two route rows, UUID column cropped -->
-_Screenshot pending: the two route rows, UUID column cropped._
+_The `EDA Team Route` table — six columns and their types._
+
+![The two route rows](images/71-sn-route-table-rows.png)
+
+_The two route rows. Team code, assignment group, stream name and connection alias are visible; the Event stream UUID column is redacted because this repo is public._
 
 ### 5.4 Failure log table
 
@@ -332,8 +335,9 @@ Open **`Send Incident to Ansible EDA`** and declare four inputs:
 The `connection_alias` type matters: the REST step's Connection Alias field expects this type and
 must be fed the **bare pill**. See §5.7.
 
-<!-- SCREENSHOT: 72-sn-action-inputs-four.png - all four action inputs with their types -->
-_Screenshot pending: all four action inputs with their types._
+![All four action inputs](images/72-sn-action-inputs-four.png)
+
+_All four action inputs. This replaces the older `50-sn-action-inputs.png`, which showed only Incident Record._
 
 ### 5.6 Action step 1 — build payload (script)
 
@@ -355,8 +359,9 @@ _Screenshot pending: all four action inputs with their types._
 > Neither produces an error, and `'use strict'` does not catch either. §6.1 has the full account of
 > how this shipped an empty `target_team` for days.
 
-<!-- SCREENSHOT: 73-sn-step1-input-vars.png - step 1's Incident_record and team_code variables with pills mapped -->
-_Screenshot pending: step 1's Incident_record and team_code variables with pills mapped._
+![Step 1's two input variables, `Incident_record` and `team_code`, with the action's pills mapped into them](images/73-sn-step1-input-vars.png)
+
+_Step 1's two input variables, `Incident_record` and `team_code`, with the action's pills mapped into them._
 
 ### 5.7 Action step 2 — REST step
 
@@ -457,11 +462,13 @@ already the "no route" behaviour. Add an `If Count is 0` branch only if you want
 > greys out and nothing is clickable. That grey-out is not a permissions problem or a UI bug; it is
 > a type mismatch telling you the loop does not belong in this flow.
 
-<!-- SCREENSHOT: 75-sn-lookup-record-step.png - the Look Up Record step: singular action, conditions, return-first -->
-_Screenshot pending: the Look Up Record step: singular action, conditions, return-first._
+![The **Look Up Record** step — the singular action, with the assignment-group and Active conditions](images/75-sn-lookup-record-step.png)
 
-<!-- SCREENSHOT: 76-sn-flow-action-pills.png - the flow's four action-input pills, Connection alias as a bare pill -->
-_Screenshot pending: the flow's four action-input pills, Connection alias as a bare pill._
+_The **Look Up Record** step — the singular action, with the assignment-group and Active conditions._
+
+![The flow's four action inputs](images/76-sn-flow-action-pills.png)
+
+_The flow's four action inputs. Team Code, Event Stream UUID and Connection alias all come from step 1's record, and **Connection alias is the bare reference pill** — not dot-walked to Sys ID. Note there is no `For Each` loop._
 
 ### 5.10 Flow properties
 
@@ -719,6 +726,11 @@ Declare this step's input variables with these **exact names**, then map step 2'
 | `response_body` | step 2 → Response Body |
 | `rest_error_message` | step 2 → Error Message |
 
+![Step 3 input variables](images/74-sn-step3-input-vars.png)
+
+_Step 3's input variables and outputs. The inputs are lowercase — `status_code`,
+`response_body`, `rest_error_message` — matching what the script reads._
+
 Declare exactly four outputs — `success`, `http_status`, `response_body`, `error_message` — and no
 `payload` output. `rest_error_message` is deliberately *not* called `error_message`: that name is
 already taken by this step's **output**, and an input and output sharing a name in one step is how
@@ -739,6 +751,12 @@ these mismatches start.
 > and **an output that stays blank while its source input is visibly populated** in execution
 > details. Both mean a name mismatch, not an endpoint problem. The *Variable Name* column in
 > execution details shows the real declared name — read it there, not off the label.
+
+![Action outputs](images/77-sn-action-outputs.png)
+
+_Action outputs. `Payload` is wired to **Build EDA Payload** (step 1) — the only step that
+assigns it — while Success, HTTP Status, Error Message and Response Body come from Process
+Response._
 
 Also check the **action's own output wiring**: `payload` must come from **step 1's** Payload output.
 This script never assigns `outputs.payload`, so pointing the action's `payload` output at step 3
@@ -783,6 +801,12 @@ gw="https://sandbox-aap-jdrebel2-dev.apps.rm1.0a51.p1.openshiftapps.com"
 curl -sS -H "Authorization: Bearer $tok" "$gw/api/eda/v1/event-streams/?page_size=50" \
   | python3 -m json.tool | grep -E '"name"|events_received'
 ```
+
+![Successful job extra_vars](images/95-aap-job-extra-vars.png)
+
+_A successful Team A job. `target_team: team-a`, `source_stream: sn-team-a` and
+`sn_close_incident: true` are populated, and the per-team credential, project and inventory
+are visible. A blank `target_team` here means step 1 is missing its `team_code` input (§6.1)._
 
 Expect `sn-team-a` to increment and `sn-team-b` to stay flat. Then repeat with **Team-B** and
 expect the mirror image — that is Experiment 1 (isolation).

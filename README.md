@@ -366,27 +366,6 @@ _Custom ServiceNow credential type — input and injector configuration_
 
 **Repeat this entire part once per team.** Nothing in it is shared.
 
-AAP scopes almost everything to an organization. Verified classification:
-
-| Object | Scope | Consequence |
-|---|---|---|
-| Organization | per team | The container for everything below |
-| Inventory | per team | Hygiene rather than a hard requirement — see the caveat below |
-| Credentials (ServiceNow, AAP Controller, Event Stream Token, Registry) | **per team** | Each team needs its own copy even where the values are identical. AAP **rejects** attaching another org's credential outright |
-| Controller project | per team | Each syncs independently from the same Git ref |
-| Job template | per team | Matched **by name** from the rulebook's `run_job_template.name` |
-| Decision Environment | per team | Each activation references its own, even for the same image |
-| EDA project | per team | |
-| Event stream + token | per team | One token per stream — see 2.9 |
-| Rulebook activation | per team | One pod per team |
-| Credential **type** (Part 1.1) | **global** | Defined once |
-
-> **Organization isolation is asymmetric — do not present it as a blanket guarantee.** Verified
-> empirically: attaching another org's **credential** to a job template is rejected
-> (`HTTP 400 "Credential matching query does not exist."`), but attaching another org's
-> **inventory** succeeds (`HTTP 200`). So an org is a hard boundary for secrets and a soft one for
-> other objects. Per-team inventories here are a deliberate choice, not something AAP forced.
-
 Worked example, the two teams in this repo:
 
 | | Team A | Team B |
@@ -403,8 +382,9 @@ Worked example, the two teams in this repo:
 
 Substitute `<Team>` below with the team you are building.
 
-<!-- SCREENSHOT: 90-aap-two-organizations.png - both organizations in Access Management -->
-_Screenshot pending: both organizations._
+![Both organizations in Access Management](docs/images/90-aap-two-organizations.png)
+
+_Both organizations in Access Management. Everything in Part 2 is created inside one of these._
 
 ### 2.1 Create the organization
 
@@ -412,6 +392,9 @@ _Screenshot pending: both organizations._
 
 Create this first. Every object below asks for an organization, and you cannot move objects
 between orgs afterward without recreating them.
+
+> ✅ **Verify:** the organization appears under Access Management → Organizations, and shows up in
+> the **Organization** dropdown on the next step. If it does not, nothing below can be created.
 
 ### 2.2 Create the inventory
 
@@ -424,6 +407,9 @@ ansible_connection: local
 ```
 
 The playbook runs `hosts: localhost` with `connection: local`, so that single host is all it needs.
+
+> ✅ **Verify:** the inventory shows **Hosts: 1**, and opening `localhost` shows
+> `ansible_connection: local` in its variables.
 
 ### 2.3 Create the controller credentials
 
@@ -442,6 +428,9 @@ The playbook runs `hosts: localhost` with `connection: local`, so that single ho
 
 _Automation Execution credential list — single-team capture; yours will show per-team credentials_
 
+> ✅ **Verify:** both credentials appear in the list with **Organization** = `<Team>`. A credential
+> created in the wrong org cannot be attached to this team's job template — AAP rejects it outright.
+
 ### 2.4 Create the controller project
 
 **Automation Execution → Projects → Create project**
@@ -459,6 +448,9 @@ how `servicenow.itsm` becomes available to the playbook.
 ![Automation Execution project pointing at this repo](docs/images/12-controller-project.png)
 
 _Automation Execution project pointing at this repo_
+
+> ✅ **Verify:** the project status reaches **Successful** and the **Revision** column shows a commit
+> hash. A project that never leaves *Pending* has not installed the collections yet.
 
 ### 2.5 Create the job template
 
@@ -499,6 +491,10 @@ ticket.
 _Job template settings. Note the **Prompt on launch** checkbox beside Extra variables — that
 is the one that must be ticked._
 
+> ✅ **Verify:** reopen the template and confirm **Prompt on launch** is ticked beside *Variables*, and
+> that the template name matches the rulebook's `run_job_template.name` **character for character**.
+> Those are the two failures that produce no useful error.
+
 ### 2.6 Create the EDA credentials
 
 EDA keeps its **own** credential store, separate from Automation Execution. Yes, you will
@@ -533,6 +529,10 @@ _Red Hat Ansible Automation Platform credential — host ends at /api/controller
 
 _Container Registry credential for registry.redhat.io_
 
+> ✅ **Verify:** all three appear with **Organization** = `<Team>`, and the AAP Controller
+> credential's host ends at `/api/controller/` with no `/v2/`. A doubled version segment makes every
+> job template lookup return 404.
+
 ### 2.7 Create the Decision Environment
 
 **Automation Decisions → Infrastructure → Decision Environments → Create**
@@ -549,6 +549,9 @@ A Decision Environment is **not** needed for a project to sync — only to run a
 ![Decision Environment using the de-supported-rhel9 image](docs/images/23-eda-decision-environment.png)
 
 _Decision Environment using the de-supported-rhel9 image_
+
+> ✅ **Verify:** the DE saves with no registry authentication error. A bad or missing pull secret fails
+> **here**, which is much easier to diagnose than the activation failing to start later.
 
 ### 2.8 Create the EDA project
 
@@ -573,6 +576,9 @@ by hand in 2.12. Nothing filters the list for you.
 ![EDA project settings](docs/images/24-eda-project.png)
 
 _EDA project settings. **Source control credential can be left empty for a public repo.**_
+
+> ✅ **Verify:** project status reaches **Completed**, and Automation Decisions → Rulebooks lists the
+> repo's rulebooks. You will see **all** of them, not just this team's — pick the right file in 2.12.
 
 ### 2.9 Generate the event stream token
 
@@ -608,6 +614,8 @@ both streams, and rotating one forces rotating both.
 Never commit one. `.gitignore` blocks `*.token`, `*.vault`, `.env*`, and `vars/secrets.yml`, but
 that is a backstop, not a plan. For rotation, see Part 7.
 
+> ✅ **Verify:** the token is exactly **64 characters**. Anything shorter means the copy was truncated.
+
 ### 2.10 Create the Event Stream credential
 
 **Automation Decisions → Infrastructure → Credentials → Create**
@@ -625,6 +633,9 @@ that is a backstop, not a plan. For rotation, see Part 7.
 ![ServiceNow Event Stream credential — auth type token, header key Authorization](docs/images/26-eda-event-stream-credential.png)
 
 _ServiceNow Event Stream credential — auth type token, header key Authorization_
+
+> ✅ **Verify:** the credential lists with type **ServiceNow Event Stream** and **Organization** =
+> `<Team>`, and the header key reads `Authorization`.
 
 ### 2.11 Create the Event Stream
 
@@ -662,12 +673,16 @@ That `<uuid>` goes into the team's route-table row. It is **regenerated** if you
 stream or move it between organizations — **PATCH** the org rather than recreating the stream, or
 every route row referencing it goes stale.
 
-<!-- SCREENSHOT: 91-aap-two-event-streams.png - both streams with per-team orgs, UUID column cropped -->
-_Screenshot pending: both event streams. **Crop the UUID column — this repo is public.**_
+![`sn-team-a` and `sn-team-b`, each owned by its own organization with its own credential](docs/images/91-aap-two-event-streams.png)
+
+_`sn-team-a` and `sn-team-b`, each owned by its own organization with its own credential. Note **Forward events to rulebook activation** is on, and the URL is truncated by the UI so no UUID is exposed._
 
 ![Event stream definition](docs/images/27-eda-event-stream.png)
 
 _Event stream definition — single-team capture_
+
+> ✅ **Verify:** the stream shows a generated URL and **Events received: 0**. Zero is correct at this
+> point — nothing has posted to it yet.
 
 ### 2.12 Create the Rulebook Activation
 
@@ -708,8 +723,9 @@ ansible_rulebook.engine - INFO - load source eda.builtin.pg_listener
 The activation should reach **Running**, and its log should end with `Waiting for events` naming
 that team's ruleset.
 
-<!-- SCREENSHOT: 92-aap-two-activations.png - both activations running, each mapped to its own stream -->
-_Screenshot pending: both activations running._
+![Both activations running, each mapped to its own stream](docs/images/92-aap-two-activations.png)
+
+_Both activations running, each mapped to its own stream._
 
 ![Rulebook activation form, showing the Event streams field mapped to the event stream](docs/images/25-eda-rulebooks.png)
 
@@ -720,6 +736,11 @@ rulebook's `ansible.eda.webhook` source._
 
 _Activation details once it is running: `Running | Container running activation`, with the
 rulebook, event stream, credential, decision environment and project git hash all shown._
+
+> ✅ **Verify:** the activation reaches **Running**, and its log shows
+> `load source eda.builtin.pg_listener` — **not** `ansible.eda.webhook` — followed by
+> `Waiting for events` naming this team's ruleset. Seeing `ansible.eda.webhook` means the stream
+> mapping on Page 2 did not save.
 
 ### 2.13 The change cycle for any rulebook edit
 
@@ -732,6 +753,39 @@ did nothing:
 3. **Re-attach** the event stream to the rulebook (Page 2 above).
 4. **Restart** the activation.
 
+Because that cycle is slow, validate condition and Jinja changes locally first — see
+[5.0](#50-test-the-rulebook-locally-first--no-aap-needed).
+
+> ✅ **Verify:** the activation detail page's **project git hash** matches your latest commit. If it
+> still shows the old hash, step 3 or 4 did not take and the activation is running the previous
+> rulebook.
+
+### 2.14 Why the whole part repeats — the scoping rules
+
+Read this once, after your first team is working. It is the reasoning behind Part 2's
+shape, not a step to perform.
+
+AAP scopes almost everything to an organization. Verified classification:
+
+| Object | Scope | Consequence |
+|---|---|---|
+| Organization | per team | The container for everything below |
+| Inventory | per team | Hygiene rather than a hard requirement — see the caveat below |
+| Credentials (ServiceNow, AAP Controller, Event Stream Token, Registry) | **per team** | Each team needs its own copy even where the values are identical. AAP **rejects** attaching another org's credential outright |
+| Controller project | per team | Each syncs independently from the same Git ref |
+| Job template | per team | Matched **by name** from the rulebook's `run_job_template.name` |
+| Decision Environment | per team | Each activation references its own, even for the same image |
+| EDA project | per team | |
+| Event stream + token | per team | One token per stream — see 2.9 |
+| Rulebook activation | per team | One pod per team |
+| Credential **type** (Part 1.1) | **global** | Defined once |
+
+> **Organization isolation is asymmetric — do not present it as a blanket guarantee.** Verified
+> empirically: attaching another org's **credential** to a job template is rejected
+> (`HTTP 400 "Credential matching query does not exist."`), but attaching another org's
+> **inventory** succeeds (`HTTP 200`). So an org is a hard boundary for secrets and a soft one for
+> other objects. Per-team inventories here are a deliberate choice, not something AAP forced.
+
 ---
 
 ## Part 3 — ServiceNow setup
@@ -740,20 +794,36 @@ did nothing:
 > [Part 4 — The payload contract](#part-4--the-payload-contract-read-this).** It defines the
 > exact JSON shape EDA needs. Getting it wrong is the failure mode that produces a successful
 > `200` and no automation.
-> Make sure to grant the Admin account the following roles `snc_basic_auth_api_access` and `snc_basic_auth_api_access`.
-> Otherwise, you will get 401 errors.
+> **Roles for the account the playbook authenticates as.** The playbook reaches ServiceNow over
+> inbound REST with Basic auth, which needs:
+>
+> | Role | Why |
+> |---|---|
+> | `snc_platform_rest_api_access` | Access to the Platform REST APIs — Table API and Import Set. Without it, every call is refused regardless of the password |
+> | `snc_basic_auth_api_access` | Passes the basic-auth gate. Only enforced when the `SNCRestrictBasicAuth` property is on, so on some instances Basic auth works without it — grant it anyway rather than depending on a property you did not set |
+>
+> Verified 2026-09-29 on this PDI: `admin` holds both explicitly (`inherited=false`).
+>
+> ⚠️ **Missing either one produces `401`, not `403`** — which reads as a wrong password and sends
+> you resetting credentials that were fine. Check the roles before the password.
 
 ### 3.0 Create the scoped application — do this first
 
 **Build none of this in Global.** Everything in Part 3 — the alias, the connection, the
 credential, the action, the flow, and the route table — belongs inside a scoped application.
 
-**System Applications → Studio → Create application** (or App Engine Studio). Name it, and let
-ServiceNow generate the scope prefix — this repo's is `James EDA Test` / `x_661661_james_tes`.
+1. **All → System Applications → Studio → Create application** (or use App Engine Studio).
+2. Give it a **Name** — this repo's is `James EDA Test`. Leave the **Scope** field alone; ServiceNow
+   generates it from your instance's vendor prefix and the name (here, `x_661661_james_tes`). You
+   cannot change it later.
+3. Click **Create**. ServiceNow drops you into the new application's scope automatically.
+4. **Set the application picker to your app before creating anything else.** It is the selector at
+   the top of Studio, and in the platform UI under the **gear icon → Developer → Application**.
 
-**Then set the application picker to it before you create anything else.** The picker decides which
-scope each new record lands in. Records created in the wrong scope cannot be moved; they have to be
-recreated.
+> ✅ **Verify:** the application picker reads your app's name, **not `Global`**, before you continue.
+> This is the single most important check in Part 3 — the picker decides which scope every new record
+> lands in, and records created in the wrong scope **cannot be moved**. They have to be deleted and
+> recreated.
 
 **Why scoped rather than Global:**
 
@@ -765,7 +835,8 @@ recreated.
   `(CNC)` or `cnc.` prefix. That convention is for Global only — adding both yields
   `x_661661_james_tes.cnc.eda.debug`, which matches no convention
 
-**Four traps, all of which fail quietly:**
+**Reference — four traps that fail quietly.** Nothing to do now; come back to this when a lookup
+returns nothing or a table will not appear in a picker.
 
 | Trap | What you see |
 |---|---|
@@ -782,11 +853,42 @@ recreated.
 > Request Central default. Records with trackable states should extend **Task**. Source:
 > KB0025878, *Scoped App Best Practices*.
 
+### 3.0.1 Create the assignment groups — one per team
+
+These are the ServiceNow side of "team," and three separate things key off them, so the names have
+to be exact.
+
+**All → User Administration → Groups → New.** Create one group per team:
+
+| Group name | Used by |
+|---|---|
+| `Team-A` | route table row, flow trigger condition, incident assignment |
+| `Team-B` | same |
+
+Add at least one member to each so you have someone to assign test incidents to.
+
+> ⚠️ **The group name is referenced by name, not by sys_id, in the route table's
+> `assignment_group` column.** Renaming a group later silently breaks routing: the lookup finds no
+> row, and with the gate in place the flow reports success and simply does nothing.
+
+> **Create these in Global, not in your scoped app.** `sys_user_group` is a platform table — groups
+> are instance-wide. This is the one thing in Part 3 that does *not* live in the scoped app. Your
+> scoped app needs a `sys_scope_privilege` record granting **read** on `sys_user_group` to reference
+> them (§3.0).
+
+> ✅ **Verify:** both groups appear in the Groups list, and each is selectable in the **Assignment
+> group** field on an incident form. If a group is not selectable there, it will not route.
+
 ### 3.1 Create the Connection & Credential Alias (how the token is sent)
 
 > **Scope check:** the application picker must show your scoped app, not Global, before you create
 > the alias. One alias, connection, and credential **per team** — see §2.9 for why each team needs
 > its own token.
+
+> ✅ **Verify:** open the alias and confirm its **HTTP Connections** related list contains a
+> connection, and that the connection has a **Credential** attached. An alias with no child
+> connection produces `Unable to load connection with alias ID:` at run time — see the three
+> variants of that message in the routing guide.
 
 This is the supported way to send `Authorization: Bearer <token>` and it requires **no
 script**.
@@ -938,6 +1040,17 @@ the script reads both spellings._
 
 **Script:**
 
+> ⚠️ **Check the script mode before you paste.** These scripts are **ES5** — `var`, no arrow
+> functions, no template literals. But since the **Xanadu** release, ServiceNow turns
+> **ECMAScript 2021 (ES12) mode on by default for newly created scripts**, regardless of the
+> JavaScript mode set on the application. ES5 code runs correctly either way, so this is not a
+> blocker — but do not assume you are in ES5 just because the app is.
+>
+> It matters in two places: `'use strict'` only actually enforces anything in ES12 mode, and the
+> per-script ES12 toggle is **not stored on the script record** (it lives in `sys_es_latest_script`),
+> so it is **lost on XML export and in update sets**. If you promote this app, set the mode at the
+> **application** level and record the choice, rather than relying on per-script toggles.
+
 ```javascript
 (function execute(inputs, outputs) {
 
@@ -1086,6 +1199,9 @@ step that assigns it.
 **Save → Publish.** A flow uses the **last published** version. If you only Save, your
 change has no effect and you will re-test the old behaviour.
 
+> ✅ **Verify:** the action shows **four** inputs, and after publishing, its status reads
+> **Published** rather than Draft. A saved-but-unpublished action is not what the flow runs.
+
 ### 3.3 Create the Flow
 
 All → Process Automation → Flow Designer → New → Flow
@@ -1154,6 +1270,10 @@ _The complete flow, with the Error Handler expanded at the bottom._
 
 
 ---
+
+> ✅ **Verify:** the flow is **Active** and **Published**, Run as reads **System user**, and a test
+> incident for one team produces a job in that team's AAP organization only. That last check is the
+> whole point — see [Part 5](#part-5--testing-end-to-end).
 
 ## Part 4 — The payload contract (read this)
 
@@ -1347,6 +1467,38 @@ field, including the four reserved keys, not just the ones you expect ServiceNow
 
 Test each hop separately. When something breaks you will know exactly which one.
 
+### 5.0 Test the rulebook locally first — no AAP needed
+
+The cheapest feedback loop. `ansible-rulebook` runs on your laptop, so you can prove a rulebook's
+**condition and Jinja references** are right before any AAP object exists.
+
+Set up a virtualenv with `ansible-core`, `ansible-rulebook`, and the `ansible.eda` +
+`servicenow.itsm` collections, then write two rulebooks:
+
+| File | Purpose |
+|---|---|
+| a **logic-only** rulebook | Replaces `run_job_template` with a `debug` action, and the webhook source with `ansible.eda.generic` carrying a fixed ServiceNow payload. Include a **non-matching** event too, to prove the condition actually filters rather than passing everything |
+| a **full** rulebook | The real `run_job_template`, pointed at a controller, for when you want the launch path exercised |
+
+Two setup gotchas that produce confusing failures:
+
+- **`JAVA_HOME` must be set.** `ansible-rulebook` embeds a Java rule engine. On Homebrew,
+  openjdk@17 lives at `/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home`.
+- **The venv's `bin` must be on `PATH`**, not merely invoked by full path — `ansible-rulebook`
+  shells out to `ansible-galaxy` and otherwise fails with *"ansible-galaxy is not installed"*.
+
+> `ansible-rulebook` validates that `run_job_template` has controller credentials **before emitting
+> any events**, so a credential-free run exits immediately without exercising your rules. Use the
+> logic-only rulebook for condition testing.
+
+You can also run `servicenow_incident_handler.yml` straight at the PDI with no AAP at all, to test
+the playbook and the ServiceNow write-back in isolation. It **closes the incident it is given**, so
+use a disposable ticket.
+
+> ✅ **Verify:** the logic-only run prints your debug output for the matching event and prints
+> nothing for the non-matching one. If both match, your condition is too loose — fix it here, where
+> the loop is seconds rather than a push-sync-reattach-restart cycle.
+
 ### 5.1 Test the event stream and token (no ServiceNow involved)
 
 ```bash
@@ -1491,6 +1643,18 @@ The action input's name case doesn't match what the script reads. `inputs.incide
 
 An output variable the downstream logic reads was never declared on the step. Undeclared
 outputs silently vanish.
+
+### Publishing a flow or action fails with `Invalid pharmacy compound uuid`
+
+The message is meaningless — it has nothing to do with pharmacy, compounds, or UUIDs. It is
+ServiceNow's generic complaint about a **dangling data pill**: a pill referencing a step, input, or
+output that no longer exists, usually after you deleted or reordered a step.
+
+**Check the Error Handler steps first.** They are collapsed by default and easy to forget, so a
+stale pill there survives edits you made to the main path. Then check any step you recently deleted
+a variable from.
+
+Fix the pill, or delete and re-add the affected step, then publish again.
 
 ### `GlideEncrypter is deprecated and now returns null`
 
