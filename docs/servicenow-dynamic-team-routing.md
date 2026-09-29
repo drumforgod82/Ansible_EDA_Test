@@ -821,14 +821,141 @@ expect the mirror image — that is Experiment 1 (isolation).
 
 ---
 
-## 9. Adding Team C later
+## 9. Adding a team (worked example: Team C)
 
-1. Group `Team-C`.
-2. Credential, alias, connection for Team C.
-3. In AAP: org, event stream `sn-team-c` + credential, rulebook, activation.
-4. One row in `EDA Team Route`.
+**Nothing in the flow, the action, or either script changes.** You are creating one set of objects
+and one table row. Written for someone who has not done it before — do the phases in order, because
+each needs something the previous one made.
 
-No flow or action changes.
+### The names you will use
+
+Decide these once and copy them exactly. A typo in any of the three **bold** ones fails silently.
+
+| Where | Object | Name for Team C |
+|---|---|---|
+| Git | Rulebook file | `rulebooks/team_c_rulebook.yml` |
+| AAP | Organization | `Team C` |
+| AAP | Inventory | `Team C Inventory` |
+| AAP | ServiceNow credential | `Team C ServiceNow PDI` |
+| AAP | Controller project | `EDA ServiceNow - Team C` |
+| AAP | Job template | **`Team C Incident Handler`** |
+| AAP | AAP Controller credential | `Team C AAP Controller` |
+| AAP | Decision environment | `DE Supported RHEL9 - Team C` |
+| AAP | EDA project | `Ansible EDA Test - Team C` |
+| AAP | Event stream credential | `team-c-stream-token` |
+| AAP | Event stream | **`sn-team-c`** |
+| AAP | Rulebook activation | `team-c-incidents` |
+| ServiceNow | Assignment group | **`Team-C`** |
+| ServiceNow | API Key credential | `Ansible EDA Team C Token` |
+| ServiceNow | Alias | `Ansible EDA Team C Alias` |
+| ServiceNow | HTTP connection | `Ansible EDA Team C Connection` |
+| ServiceNow | Route table row | `team-c` |
+
+The three bold ones are matched **by name** at run time: the rulebook finds the job template by name,
+the rulebook's condition tests the stream name, and the route row references the group by name.
+
+### Phase 0 — the rulebook, first
+
+The EDA project can only offer you a rulebook that is already in Git, so this comes before anything
+in AAP.
+
+1. Copy `rulebooks/team_b_rulebook.yml` to `rulebooks/team_c_rulebook.yml`.
+2. Change exactly four things:
+   - `name:` at the top → `Team C - ServiceNow incident automation`
+   - the rule `name:` → `Launch Team C incident handler`
+   - the condition's stream name → `"sn-team-c"`
+   - `run_job_template.name` → `"Team C Incident Handler"` and `organization` → `"Team C"`
+3. Leave the `extra_vars` block alone, including `sn_close_incident: true`.
+4. Commit and push.
+
+> ✅ **Verify:** `python3 -c "import yaml;yaml.safe_load(open('rulebooks/team_c_rulebook.yml'))"`
+> exits silently. A YAML error here becomes a confusing project-sync failure later.
+
+### Phase 1 — the token
+
+```bash
+openssl rand -hex 32
+```
+
+Put it in your password vault now. You will paste this same value into **two** places: AAP in Phase 3,
+ServiceNow in Phase 4.
+
+> ✅ **Verify:** it is exactly **64 characters**.
+
+### Phase 2 — AAP, Automation Execution side
+
+Follow [Part 2](../README.md#part-2--per-team-setup) steps 2.1–2.5 with the Team C names above:
+organization → inventory → credentials → project → job template.
+
+> ⚠️ **Do not forget *Prompt on launch* on the job template.** Without it the controller discards the
+> variables the rulebook sends and the job fails on undefined variables with nothing explaining why.
+
+> ✅ **Verify:** the project shows **Successful** with a revision hash, and the job template's name is
+> character-identical to `run_job_template.name` in your new rulebook.
+
+### Phase 3 — AAP, Automation Decisions side
+
+Follow [Part 2](../README.md#part-2--per-team-setup) steps 2.6–2.12: EDA credentials → decision
+environment → EDA project → event stream credential (the Phase 1 token, **bare**) → event stream →
+activation.
+
+Two Team-C-specific points:
+
+- When you sync the EDA project, it lists **every** rulebook in the repo. Pick
+  `team_c_rulebook.yml` — nothing filters the list for you.
+- After creating the event stream **`sn-team-c`**, copy its generated URL. The UUID inside it goes
+  into the route row in Phase 4.
+
+> ✅ **Verify:** the activation reaches **Running**, and its log shows
+> `load source eda.builtin.pg_listener` followed by `Waiting for events` naming the Team C ruleset.
+> If it says `ansible.eda.webhook`, the stream mapping on Page 2 did not save.
+
+### Phase 4 — ServiceNow
+
+Set the application picker to your scoped app first, except where noted.
+
+1. **Assignment group `Team-C`** — *User Administration → Groups → New*. **In Global**, not the scoped
+   app; `sys_user_group` is a platform table. Add at least one member.
+2. **API Key credential** `Ansible EDA Team C Token` — header `Authorization`, value is the Phase 1
+   token **bare**, with the **API Key Prefix field left empty** (§5.2).
+3. **Alias** `Ansible EDA Team C Alias` — type Connection and Credential, connection type HTTP.
+4. **HTTP connection** — create it from the **alias's HTTP Connections related list**, not from the
+   Connections table. Connection URL is the AAP host, **base URL only**.
+5. **One row in `EDA Team Route`**: `team_code` = `team-c`, `assignment_group` = `Team-C`,
+   `event_stream_name` = `sn-team-c`, `event_stream_uuid` = the UUID from Phase 3,
+   `connection_alias` = the alias above, `active` = true.
+
+> ✅ **Verify:** open the alias — its HTTP Connections list has one row, and that connection has a
+> Credential attached. An alias with no child connection produces
+> `Unable to load connection with alias ID:` at run time.
+
+### Phase 5 — test
+
+Create an incident with **Caller** = `Event Management` and **Assignment group** = `Team-C`.
+
+| Check | Where | Expect |
+|---|---|---|
+| Flow ran | ServiceNow → the flow's executions | Step 3 `If Successful` = **true** |
+| Step 3 outputs | same, expand the action | `http_status = 200`, `success = true` |
+| Event arrived | AAP → Event Streams | `sn-team-c` **Events received** incremented; `sn-team-a` and `sn-team-b` unchanged |
+| Job ran | AAP → Jobs | `Team C Incident Handler`, status **Successful** |
+| Routing correct | that job → Details → Extra variables | `target_team: team-c`, `source_stream: sn-team-c` |
+| Write-back | the incident | Work note added, and state **Closed** |
+
+That "unchanged" row is the one worth pausing on — it is the proof that per-team streams isolate, not
+just that Team C works.
+
+### If it does not work
+
+| Symptom | Cause |
+|---|---|
+| Nothing happens at all | Trigger condition — is the group empty, or the caller not Event Management? |
+| Flow errors on step 1 | No matching route row. Check `assignment_group` and `active` on the row |
+| `Unable to load connection with alias ID:` | Alias has no child connection (Phase 4 step 4), or the pill was dot-walked to Sys ID |
+| Event stream 401/403 | Token mismatch. Compare lengths — 64 chars — and confirm no prefix on either side |
+| Stream counter moves, no job | Rulebook mismatch. Compare the condition's stream name and `run_job_template.name` |
+| Job fails on undefined variables | *Prompt on launch* is off on the job template |
+| `target_team` blank | Step 1 of the action is missing its `team_code` input (§6.1) — affects all teams, not just C |
 
 ## 10. Making routing smarter later
 
