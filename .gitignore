@@ -27,3 +27,7 @@ __pycache__/
 .idea/
 *.swp
 *~
+
+# provision_team.py manifests: record real object ids for --destroy, and are
+# per-machine and per-instance state, not source.
+.provision/

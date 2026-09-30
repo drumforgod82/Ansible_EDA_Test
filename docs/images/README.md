@@ -3,8 +3,20 @@
 Screenshots referenced by the main [README](../../README.md) and by
 [Dynamic team routing](../servicenow-dynamic-team-routing.md).
 
-**`50-sn-action-inputs.png` is superseded** by `72-sn-action-inputs-four.png` — it shows only the
-Incident Record input, from before the action took four. Kept only because Part 3 still references it.
+## Files kept on disk but not displayed
+
+Four images are intentionally not shown by any page. They are listed in the table below so the
+inventory stays complete — **not** because a page is missing an image.
+
+| File | Why it is not displayed |
+|---|---|
+| `50-sn-action-inputs.png` | Superseded by `72-sn-action-inputs-four.png` — shows only the Incident Record input, from before the action took four. Part 3 still names it in prose as "the older version" |
+| `54-sn-action-outputs.png` | Superseded — shows the older output wiring |
+| `61-sn-flow-action-input.png` | Superseded — pre-dates the four-input action step |
+| `28-eda-event-stream-url.png` | **Obsolete, not merely superseded.** Shows the retired *single shared* stream (`ServiceNow Event Stream`, organization `Default`), which no longer exists, and its callout reads "Copy this URL for ServiceNow REST Message" — that is the Appendix A OAuth pattern, not the event-stream design this guide uses. Safe to delete; kept only so the count reconciles |
+
+If you recapture any of the first three, display the new one and delete the old rather than growing
+this list.
 
 **Redaction:** `71-sn-route-table-rows.png` and `95-aap-job-extra-vars.png` have the Event stream
 UUID and record sys_ids masked. This repo is public and the UUIDs are deliberately absent from the
