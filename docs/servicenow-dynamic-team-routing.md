@@ -860,16 +860,28 @@ The EDA project can only offer you a rulebook that is already in Git, so this co
 in AAP.
 
 1. Copy `rulebooks/team_b_rulebook.yml` to `rulebooks/team_c_rulebook.yml`.
-2. Change exactly four things:
+2. Change all **five** values — they sit on four lines, which is exactly how one gets missed:
    - `name:` at the top → `Team C - ServiceNow incident automation`
    - the rule `name:` → `Launch Team C incident handler`
    - the condition's stream name → `"sn-team-c"`
-   - `run_job_template.name` → `"Team C Incident Handler"` and `organization` → `"Team C"`
+   - `run_job_template.name` → `"Team C Incident Handler"` **and** `organization` → `"Team C"`
 3. Leave the `extra_vars` block alone, including `sn_close_incident: true`.
 4. Commit and push.
 
-> ✅ **Verify:** `python3 -c "import yaml;yaml.safe_load(open('rulebooks/team_c_rulebook.yml'))"`
-> exits silently. A YAML error here becomes a confusing project-sync failure later.
+> ✅ **Verify — both checks, not just the first:**
+>
+> ```bash
+> python3 -c "import yaml;yaml.safe_load(open('rulebooks/team_c_rulebook.yml'))"   # parses
+> grep -n 'Team B\|team-b\|team_b' rulebooks/team_c_rulebook.yml                   # no output
+> ```
+>
+> The parse catches YAML damage, which would otherwise surface later as a confusing project-sync
+> failure. The `grep` catches the copy-paste leftover, which the parse cannot — **a rulebook with
+> Team B's rule name is still valid YAML and still fires.** It was missed on the real Team C build:
+> the rule `name:` stayed `Launch Team B incident handler`. Nothing breaks at run time, because rule
+> names are never matched on — but `Last rule fired` on the activation, and the rule name in the job's
+> event payload, then both name the wrong team. That is the signal Phase 5's isolation row depends on,
+> so a wrong name here makes a *passing* test unreadable rather than making it fail.
 
 ### Phase 1 — the token
 
