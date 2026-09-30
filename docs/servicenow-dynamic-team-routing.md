@@ -892,6 +892,17 @@ openssl rand -hex 32
 Put it in your password vault now. You will paste this same value into **two** places: AAP in Phase 3,
 ServiceNow in Phase 4.
 
+On macOS, store it in the Keychain — one item per team, named for the stream:
+
+```bash
+security add-generic-password -a "$USER" -s sandbox-eda-team-c -w -U
+```
+
+> 🔑 **Leave `-w` with no value** so it prompts instead of taking the token as an argument, which
+> would record it in your shell history. Full rationale, the read-back command, and the `~/.zshrc`
+> export are in [README 2.9](../README.md#on-macos-store-it-in-the-keychain). Optional — it is only
+> needed if you want to POST at the stream directly in Phase 5.
+
 > ✅ **Verify:** it is exactly **64 characters**.
 
 ### Phase 2 — AAP, Automation Execution side
