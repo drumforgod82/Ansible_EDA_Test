@@ -18,7 +18,7 @@
         port: 5000
 
   rules:
-    - name: Launch Team B incident handler
+    - name: Launch Team C incident handler
       # See team_a_rulebook.yml for why the stream name is the primary check.
       condition: >-
         event.meta.eda_event_stream_name == "sn-team-c" and
@@ -48,5 +48,5 @@
               # racing to close one ticket, which was only possible under the old
               # single-stream fan-out. Per-team streams plus the EDA Team Route table send
               # each incident to exactly one team, and activation 1 is stopped, so the race
-              # cannot occur. Enabled on both teams to keep behaviour symmetric.
+              # cannot occur. Enabled on every team to keep behaviour symmetric.
               sn_close_incident: true
