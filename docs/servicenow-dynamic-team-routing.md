@@ -823,6 +823,27 @@ expect the mirror image — that is Experiment 1 (isolation).
 
 ## 9. Adding a team (worked example: Team C)
 
+### Two ways to do this
+
+| | Do this if | Start at |
+|---|---|---|
+| **Manual — recommended the first time** | You have not built a team before, or you do not have shell access to the AAP and PDI APIs | [At a glance](#at-a-glance), then **Phases 0–5 in full** |
+| **Scripted** — `provision_team.py` | You have already done it manually and just want the team to exist | [Provisioning a team with a script](#provisioning-a-team-with-a-script) |
+
+**Build your first team by hand.** Not as a hazing ritual — because of what the manual path teaches
+that a successful script run cannot. Four of the failure modes here are **silent**: a rulebook that was
+not pushed before the project sync, the job template's `Playbook` field pointing at a rulebook,
+*Prompt on launch* left off, and a `Bearer ` prefix on the token. The script removes all four by
+construction, which is exactly why it teaches you nothing about them. The first time something breaks
+in a way the script does not cover, you want to already know which object talks to which.
+
+Doing it manually also shows you what the architecture is claiming: you will notice that you never
+open Workflow Studio, and that the only thing tying a team together is one row in a table.
+
+**Both paths produce the same result and neither touches the flow or the action.** The manual phases
+are the source of truth for *what* gets built and why; the script automates exactly those steps and
+nothing more. If the two ever disagree, the manual path is right and the script has a bug.
+
 ### At a glance
 
 **You never open Workflow Studio.** Adding a team only *creates* things. It modifies nothing that
@@ -859,6 +880,7 @@ If you have done this before, this is the whole job. Each line links to the deta
                  -> event stream sn-team-c -> activation      (copy the stream UUID)
 [ ] 4  SN:       group Team-C (Global) -> API Key cred -> alias -> HTTP connection
                  -> ONE row in EDA Team Route
+[ ] 4b CHECK:    python3 scripts/verify_team.py --team team-c    <- do this before testing
 [ ] 5  Test:     new incident, group Team-C, caller Event Management
           ^ sn-team-c increments AND sn-team-a / sn-team-b stay flat
 ```
@@ -866,6 +888,67 @@ If you have done this before, this is the whole job. Each line links to the deta
 **Four things fail silently; everything else throws.** Push before Phase 3 (the source mapping pins to
 the rulebook's SHA), the job template's *Playbook* field, *Prompt on launch*, and storing the token
 with a `Bearer ` prefix. If something is wrong and nothing is complaining, it is one of those four.
+
+**Step 4b catches all four mechanically** — run it instead of trusting yourself to have clicked
+correctly. See [Verifying the build with a script](#verifying-the-build-with-a-script) below.
+
+### Provisioning a team with a script
+
+`scripts/provision_team.py` builds all 16 objects. It removes four failure modes by construction
+rather than warning about them: the token is generated once and written to both sides so there is
+nothing to mistype; the event stream is created here so its UUID is known rather than copied; and the
+`Playbook` field and *Prompt on launch* are constants.
+
+```bash
+# 1. render this team's rulebook from an existing one
+python3 scripts/provision_team.py --team team-d --render-rulebook --apply
+
+# 2. commit and push it -- the EDA project can only offer a rulebook the remote has
+git add rulebooks/team_d_rulebook.yml && git commit -m "add team_d_rulebook.yml" && git push
+
+# 3. preview everything. writes nothing
+python3 scripts/provision_team.py --team team-d --servicenow-apply
+
+# 4. build it
+python3 scripts/provision_team.py --team team-d --servicenow-apply --apply
+
+# 5. check it
+python3 scripts/verify_team.py --team team-d
+```
+
+**Dry run is the default — `--apply` is required before anything is written.** Step 2 is a real gate:
+the script refuses to continue until the rulebook is on the remote branch, rather than letting you
+discover it later as an empty rulebook list.
+
+| Flag | Use |
+|---|---|
+| `--branch <name>` | Branch the projects sync from. Defaults to `main` |
+| `--servicenow-apply` | Create the ServiceNow objects too. Without it you get a checklist with every value resolved, to enter by hand |
+| `--aap-only` | Skip ServiceNow entirely |
+| `--no-activate` | Skip the activation. Use it when the cluster has no room for another pod |
+| `--destroy --apply` | Remove everything the run created, from its manifest |
+| `--force-render` | Overwrite an existing rulebook. Off by default so a re-run cannot discard per-team rules |
+
+Every step is check-then-create, so re-running after a failure resumes instead of duplicating.
+Everything created is recorded in `.provision/<team>.json`, which is what makes `--destroy` exact —
+it deletes only what this script made.
+
+> ✅ **Verified end to end 2026-09-30.** A team was provisioned entirely by script, routed a real
+> incident to its own stream — the other teams' counters did not move — ran its job, closed the
+> incident, and was then destroyed leaving nothing behind. **The flow and the action were not
+> modified**, confirmed by their `sys_updated_on` before and after.
+
+Two things it cannot do:
+
+- **`sys_scope` cannot be set through the Table API**, so the alias is created in *global* rather than
+  inside the scoped application, and its `id` lacks the `x_<scope>.` prefix. Routing is unaffected —
+  the flow resolves the alias by sys_id — so this is cosmetic. Create the alias by hand if you want it
+  in-scope.
+- **A resumed run cannot set the ServiceNow credential.** AAP will not reveal an existing stream's
+  token, so if the stream already exists the script has no token to store. Either create that one
+  credential by hand, or `--destroy` and provision in a single pass.
+
+---
 
 Everything below is the click-by-click version for someone who has not done it before. Do the phases
 in order — each needs something the previous one made.
@@ -879,7 +962,7 @@ Decide these once and copy them exactly. A typo in any of the three **bold** one
 | Git | Rulebook file | `rulebooks/team_c_rulebook.yml` |
 | AAP | Organization | `Team C` |
 | AAP | Inventory | `Team C Inventory` |
-| AAP | ServiceNow credential | `Team C ServiceNow PDI` |
+| AAP | ServiceNow credential | `ServiceNow PDI - Team C` |
 | AAP | Controller project | `EDA ServiceNow - Team C` |
 | AAP | Job template | **`Team C Incident Handler`** |
 | AAP | AAP Controller credential | `Team C AAP Controller` |
@@ -1001,6 +1084,38 @@ Set the application picker to your scoped app first, except where noted.
 > ✅ **Verify:** open the alias — its HTTP Connections list has one row, and that connection has a
 > Credential attached. An alias with no child connection produces
 > `Unable to load connection with alias ID:` at run time.
+
+### Verifying the build with a script
+
+Before you create a test incident, check the wiring mechanically:
+
+```bash
+export AAP_GATEWAY="https://<your-aap-host>"
+python3 scripts/verify_team.py --team team-c
+```
+
+It is **read-only** — GETs only, no writes to AAP, ServiceNow, or Git — and exits non-zero if any
+check fails. 27 checks across three layers, derived from the team code by the naming convention in
+the table above:
+
+| Layer | Checks |
+|---|---|
+| Repo | Rulebook exists and parses; **no other team's name left in it**; condition tests `sn-team-c`; `run_job_template.name` and `organization` correct |
+| AAP | Org, controller project (and that it synced), job template; **Playbook is `servicenow_incident_handler.yml`**; **Prompt on launch on**; stream exists, does **not** forward `Authorization`, forwarding on; activation running on the right rulebook |
+| ServiceNow | Assignment group exists and is active; route row exists, active, names the right group and stream; has a connection alias; the alias has a child connection |
+
+> 🎯 **The check nothing else can do:** it compares the `event_stream_uuid` in the ServiceNow route
+> row against the real UUID of the AAP stream. Both sides look correct on their own screen and only
+> disagree when compared — and a wrong UUID posts your incidents at another team's stream, or at
+> nothing, while ServiceNow still reports a cheerful `2xx`. No amount of careful clicking finds that.
+
+Environment it needs: `SANDBOX_AAP_PAT_TOKEN`, `SN_PDI_HOST`, `SN_PDI_USERNAME`, `SN_PDI_PASSWORD`
+(see [README 2.9](../README.md#on-macos-store-it-in-the-keychain)), plus `AAP_GATEWAY` or `--gateway`.
+Override the route table with `--route-table` if your scope prefix differs. `--json` emits
+machine-readable output for CI.
+
+A clean run does **not** mean the team works — it means nothing is misconfigured in a way a machine
+can see. Phase 5 is still required.
 
 ### Phase 5 — test
 

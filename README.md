@@ -40,6 +40,26 @@ This README covers the AAP and ServiceNow object setup. These go further:
 Scripts pasted into ServiceNow live in [`docs/scripts/`](docs/scripts/) and are the canonical
 copies. Paste from those files rather than from a rendered page.
 
+### Tooling in `scripts/`
+
+Two Python tools, stdlib only. Both take `--gateway` or read `AAP_GATEWAY`.
+
+| Tool | What it does |
+|---|---|
+| [`verify_team.py`](scripts/verify_team.py) | **Read-only.** 29 checks across the repo, AAP and ServiceNow for one team, including a comparison of the route row's `event_stream_uuid` against the real AAP stream UUID, and of the activation's pinned `rulebook_hash` against the rulebook at the project's synced revision. Exits non-zero on any failure; `--json` for CI |
+| [`provision_team.py`](scripts/provision_team.py) | Creates all 16 objects for a new team. **Dry run by default** — `--apply` is required to write. Idempotent, records a manifest, and `--destroy` removes exactly what it made |
+
+**Adding a team is documented both ways — but build your first one by hand.** Work through
+[§9 of the routing guide](docs/servicenow-dynamic-team-routing.md#9-adding-a-team-worked-example-team-c)
+manually to learn what gets built and why; use `provision_team.py` for teams after that. The script
+removes four *silent* failure modes by construction, which is precisely why a successful run teaches
+you nothing about them — and they are the ones you will need to recognise when something breaks that
+the script does not cover.
+
+Neither path touches the flow or the action. Run `verify_team.py` afterwards either way: it is written
+from this documentation while the provisioner is written from the API, so the two cross-check each
+other rather than sharing one set of assumptions.
+
 ---
 
 ## Build order — do these in this exact sequence
@@ -52,6 +72,7 @@ ServiceNow action and flow, plus one route-table row per team.**
 
 | # | Step | Section | Why it must come after the previous step |
 |---|---|---|---|
+| 0 | **Get an AAP instance and a ServiceNow PDI**, with admin on both | [4.0](#40-getting-the-two-platforms-start-here-if-you-have-neither) | Skip only if you already have both. Also read the PDI ten-day reclaim warning there before you build anything you would mind losing |
 | 1 | Create the custom ServiceNow credential type | [1.1](#11-create-the-custom-servicenow-credential-type) | Every team's credential is *of* this type |
 | | **↓ repeat 2–13 per team ↓** | | |
 | 2 | Create the organization | [2.1](#21-create-the-organization) | Everything below is scoped to it, and objects cannot be moved between orgs |
@@ -166,6 +187,14 @@ setup.
 │   └── requirements.yml             # servicenow.itsm — installed at project sync
 ├── servicenow_incident_handler.yml  # the playbook the job template runs
 ├── my_action_playbook.yml           # minimal debug playbook, useful for smoke tests
+├── scripts/
+│   ├── verify_team.py               # read-only: 29 checks on one team's wiring
+│   └── provision_team.py            # builds a team's 16 objects; dry run by default
+├── docs/
+│   ├── servicenow-dynamic-team-routing.md   # routing design + §9 add-a-team runbook
+│   ├── phase2b-two-org-runbook.md
+│   ├── scripts/                     # canonical copies of the ServiceNow step scripts
+│   └── images/
 ├── aap-eda-project-sync-fix.md      # troubleshooting: EDA project stuck "Pending"
 └── README.md
 ```
@@ -234,6 +263,44 @@ defaults so a sparse event degrades instead:
 ---
 
 ## 4. Prerequisites
+
+### 4.0 Getting the two platforms (start here if you have neither)
+
+Everything in this guide needs an AAP instance and a ServiceNow instance. Both are available at no
+cost. Deep links on vendor sites move, so these are entry points plus what to look for — if a path
+has changed, search the developer portal for the product name rather than trusting a URL here.
+
+| You need | Where to start | Notes |
+|---|---|---|
+| Red Hat account | <https://developers.redhat.com> → *Register* | Free. Required before anything else Red Hat |
+| An OpenShift cluster to run AAP on | <https://developers.redhat.com> → *Developer Sandbox* | Free, time-limited and renewable, no card. **This lab runs AAP 2.7 inside a Developer Sandbox namespace** |
+| Or AAP hosted by Red Hat | [AAP trial](https://www.redhat.com/en/technologies/management/ansible/trial) · [console.redhat.com/ansible](https://console.redhat.com/ansible/ansible-dashboard) | A trial subscription is the simpler route if you do not want to run OpenShift yourself |
+| ServiceNow account | <https://developer.servicenow.com> → *Sign up* | Free developer program account |
+| A ServiceNow instance | Same site → *Request Instance* | Gives you a **PDI** (Personal Developer Instance) with a `devNNNNNN` subdomain and **full admin** |
+
+**You need admin on both.** That is not a nicety: Part 1 edits a credential *type*, Part 3 creates a
+scoped application, and the flow reads an encrypted credential. A restricted account cannot do this.
+
+> 🔴 **A PDI is reclaimed after about ten days of inactivity, and you lose everything on it.** For
+> this project that means the scoped app, the action, the flow, the route table and every route row.
+> Two habits make that survivable:
+> 1. Log into the instance periodically — the inactivity clock resets on use.
+> 2. Treat the PDI as disposable and keep the source of truth elsewhere: export the scoped app to an
+>    **Update Set**, or publish it to source control. Rebuilding by hand from Part 3 is hours;
+>    re-importing is minutes.
+>
+> The same reasoning applies to the AAP side, which is why [Part 7](#after-rebuilding-the-aap-instance)
+> documents what does and does not survive a rebuild.
+
+> ⚠️ **The Developer Sandbox idles workloads it thinks are unused.** That is the direct cause of two
+> behaviours documented later and *not* a fault in your build: the
+> [first request after idle returning 503](#the-aap-ui-shows-a-provisioning-screen-and-the-api-returns-503),
+> and activations dying with `Missing container for running activation`. Retry before you debug.
+
+> ℹ️ **PDI platform versions differ.** A newly requested PDI may be on a newer release than the one
+> this guide was written against, and platform defaults do change between them — new scripts default
+> to **ES12** rather than ES5 script mode, for one. Where behaviour here disagrees with your instance,
+> your instance is right; verify against it rather than against this document.
 
 ### AAP
 
@@ -2006,6 +2073,23 @@ attach the event stream to the activation. Red Hat states plainly what happens i
 goes stale: *"If the rulebook is modified after the source mapping has been created and a
 Restart happens, the rulebook activation fails."* The API's own error text for this is
 **"Rulebook has changed since the sources were mapped. Please reattach event streams."**
+
+It is **plain `sha256` of the file's raw bytes** — measured against a live activation, not inferred.
+So you can check for staleness yourself, without waiting for a restart to fail:
+
+```bash
+# what the activation pinned, vs what the project actually synced
+git show <eda-project-git-hash>:rulebooks/team_a_rulebook.yml | shasum -a 256
+```
+
+Compare that against `rulebook_hash` inside the activation's `source_mappings`. Use the **synced
+revision**, not your working tree — an uncommitted edit is not what AAP is running.
+[`scripts/verify_team.py`](scripts/verify_team.py) does this comparison for you.
+
+> ⚠️ **There is no content normalisation — whitespace counts.** Adding a single trailing newline
+> produces a different hash and invalidates the mapping. So reformatting a rulebook, or an editor
+> that silently appends a final newline on save, costs you the full re-attach cycle even though
+> nothing functional changed.
 
 That means **every** rulebook edit — not just a first-time setup — requires the full
 push → sync → re-attach → restart cycle, per organization whose rulebook you touched. The
