@@ -34,6 +34,7 @@ This README covers the AAP and ServiceNow object setup. These go further:
 | Guide | Covers |
 |---|---|
 | [Dynamic team routing](docs/servicenow-dynamic-team-routing.md) | Routing one incident to the right team's event stream at run time via an `EDA Team Route` config table, instead of one flow per team. Includes the Flow Designer build, both action scripts, cross-scope privileges, and three later upgrade paths. |
+| [Adding a record type](docs/adding-record-types.md) | Adding **SCTASK** and **Problem** alongside incidents for teams that already exist: a catalog-item enrollment table, one new action and flow per record type, a rule per record type in the team rulebook. Routing does not change — the same route row serves every record type for a team. |
 | [Phase 2b two-org runbook](docs/phase2b-two-org-runbook.md) | Standing up two AAP organizations with their own streams, credentials, and activations, in dependency order. Records what AAP does and does not isolate per org. |
 | [AAP EDA project sync fix](aap-eda-project-sync-fix.md) | Diagnosing an EDA project sync stuck in `Pending` — the default worker is OOMKilled mid-clone at 400Mi. |
 
