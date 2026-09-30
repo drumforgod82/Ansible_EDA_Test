@@ -51,12 +51,17 @@ Budget roughly 2–3 hours for a first pass. Steps 5.2 and 5.7 are where mistake
 
 ## 1. Why this works: both REST step fields accept pills
 
-Verified in the PDI 2026-09-28. The existing REST step stores these as separate fields:
+Verified in the PDI 2026-09-28. The REST step stores these as separate fields — which is what makes
+one step serve every team.
 
-| Field | Current value | Pill? |
+The "Before" column records the **single-stream state this change replaced**, for contrast. Those two
+values no longer exist: `Ansible EDA Token Alias` is a legacy record and stream `25c68345…` has been
+deleted. Both fields now carry pills fed from the route table.
+
+| Field | Before (single shared stream) | Pill? |
 |---|---|---|
-| `connection_alias` | `14a6516a…` (Ansible EDA Token Alias) | **yes** |
-| `resource_path` | `eda-event-streams/api/eda/v1/external_event_stream/25c68345…/post/` | **yes** |
+| `connection_alias` | `14a6516a…` (`Ansible EDA Token Alias`, now legacy) | **yes** |
+| `resource_path` | `eda-event-streams/api/eda/v1/external_event_stream/25c68345…/post/` — stream now deleted | **yes** |
 | `base_url` | gateway host | static is fine — one gateway for all teams |
 | `headers` | `User-Agent`, `Content-Type` — **no `Authorization`** | — |
 
@@ -167,17 +172,14 @@ So the table carries both: `team_code` (stable key) and `assignment_group` (swap
 
 ---
 
-## Screenshots to capture
+## Screenshots — all captured
 
-This guide has none yet. The README's existing images are all from the **single-team** build and
-several are now wrong — `50-sn-action-inputs.png` is captioned "Action inputs — Incident Record"
-when the action has four inputs, and the event-stream and activation shots show one of each.
+**All 11 are captured and displayed.** This section is now an index of which image belongs to which
+step, not a to-do list. Naming convention for any future addition: `7N-sn-routing-<what>.png` for
+ServiceNow, `9N-aap-<what>.png` for AAP. The full inventory, including four images kept on disk but
+deliberately not displayed, is in [`docs/images/README.md`](images/README.md).
 
-Capture these into `docs/images/` using the existing numbering convention, then replace the
-matching placeholder below. Naming: `7N-sn-routing-<what>.png` for ServiceNow, `9N-aap-<what>.png`
-for AAP.
-
-| # | Filename | What to show | Section |
+| # | Filename | Shows | Section |
 |---|---|---|---|
 | 1 | `70-sn-route-table-columns.png` | `EDA Team Route` table — the six columns and their types | §5.3 |
 | 2 | `71-sn-route-table-rows.png` | The two route rows. **Blur or crop the Event stream UUID column.** | §5.3 |
@@ -480,16 +482,25 @@ permission error.
 Record-triggered flows run in their own transaction, so incident creation is not waiting on AAP.
 Confirm the trigger is not set to run in the foreground.
 
-### 5.11 Disable the old path
+### 5.11 The old single-stream path — already removed
 
-In AAP, **stop activation 1** (`ServiceNow Event Stream Rulebook`).
+✅ **Nothing to do here.** Done 2026-09-29/30. Recorded because the deletion *order* is the
+non-obvious part and would matter again in a rebuild.
 
-Leave stream 1 and credential 4 until both teams fire end to end. `my_eda_rulebook.yml` expects
-the old `incident_created` value and will not match the new payload, so it is already dead — but
-keeping it costs nothing and preserves a rollback.
+The original design had one shared event stream (`ServiceNow Event Stream`, organization `Default`)
+feeding one activation on `my_eda_rulebook.yml`. All of it is gone: activation 1, stream 1, and the
+orphaned credential 4.
 
-Delete later **in this order**: activation 1 → stream 1 → credential 4. The activation holds a
-mapping to the stream, so the stream cannot go first.
+**If you ever tear down a stream again, the order is forced:** activation → stream → credential. The
+activation holds the source mapping to the stream, so the stream cannot go first; AAP answers with
+`409 "... is being referenced by 1 activation(s)"`. And because activation deletion is
+**asynchronous**, the stream and credentials stay blocked for roughly 15 seconds after the activation
+delete reports success — so retry rather than concluding the order was wrong.
+[`scripts/provision_team.py --destroy`](../scripts/provision_team.py) implements exactly this.
+
+`my_eda_rulebook.yml` is still in the repo. It is **not** wired to anything: it conditions on the old
+flat `incident_created` value, which no current payload produces, so it cannot match. It survives only
+as the worked example behind [README Part 4](../README.md#part-4--the-payload-contract-read-this).
 
 ---
 
