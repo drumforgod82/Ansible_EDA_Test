@@ -476,6 +476,26 @@ _Automation Execution project pointing at this repo_
 > mismatch produces a job-template-not-found error at launch time, which reads like a permissions
 > problem. Compare against the `name:` field in `rulebooks/team_<x>_rulebook.yml`.
 
+> ⚠️ **Pick the playbook, not the rulebook — the dropdown offers both.** This controller project is
+> the *same repository* that holds the rulebooks, so `Playbook` lists `rulebooks/team_a_rulebook.yml`,
+> `rulebooks/team_b_rulebook.yml`, and so on right alongside `servicenow_incident_handler.yml`. The
+> team-named ones look like the obvious choice on a job template you just named `<Team> Incident
+> Handler`, and they are the wrong answer every time. **Every team's job template runs the same
+> playbook:** `servicenow_incident_handler.yml`. The per-team part is the rulebook, and that is
+> selected on the *activation* (2.12), never here.
+>
+> The failure is loud but only after an event arrives, so you will see it as a red job rather than as
+> a bad setting:
+>
+> ```
+> ERROR! 'sources' is not a valid attribute for a Play
+> The error appears to be in '/runner/project/rulebooks/team_c_rulebook.yml': line 13, column 3
+> ```
+>
+> A rulebook is not a playbook — `sources:` and `rules:` are not play keywords. If you see that
+> error, nothing is wrong with your rulebook, your event, or your token: change this one field.
+> Hit on the real Team C build, three failed jobs deep.
+
 **On closing the incident.** The playbook gates the close behind `sn_close_incident`, which
 defaults to **`false`**. Both `team_a_rulebook.yml` and `team_b_rulebook.yml` pass `true`, so
 EDA-triggered runs close the incident for either team — verified 2026-09-29 on INC0010017 (job 38)
@@ -491,9 +511,12 @@ ticket.
 _Job template settings. Note the **Prompt on launch** checkbox beside Extra variables — that
 is the one that must be ticked._
 
-> ✅ **Verify:** reopen the template and confirm **Prompt on launch** is ticked beside *Variables*, and
-> that the template name matches the rulebook's `run_job_template.name` **character for character**.
-> Those are the two failures that produce no useful error.
+> ✅ **Verify:** reopen the template and confirm all three:
+> 1. **Prompt on launch** is ticked beside *Variables*
+> 2. The template name matches the rulebook's `run_job_template.name` **character for character**
+> 3. **Playbook** reads `servicenow_incident_handler.yml` — **not** anything under `rulebooks/`
+>
+> The first two produce no useful error at all. The third produces a misleading one.
 
 ### 2.6 Create the EDA credentials
 

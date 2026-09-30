@@ -823,9 +823,52 @@ expect the mirror image — that is Experiment 1 (isolation).
 
 ## 9. Adding a team (worked example: Team C)
 
-**Nothing in the flow, the action, or either script changes.** You are creating one set of objects
-and one table row. Written for someone who has not done it before — do the phases in order, because
-each needs something the previous one made.
+### At a glance
+
+**You never open Workflow Studio.** Adding a team only *creates* things. It modifies nothing that
+already exists.
+
+| | Count | What |
+|---|---|---|
+| **Modify** | **0** | The flow, the action, both script steps, and the route table's columns — all untouched |
+| Create in Git | 1 | The team's rulebook |
+| Create in AAP | 11 | Org · inventory · ServiceNow credential · controller project · job template · AAP Controller credential · decision environment · EDA project · stream token credential · event stream · activation |
+| Create in ServiceNow | 4 | Assignment group · API Key credential · Connection & Credential Alias · HTTP connection |
+| Add as **data** | 1 row | `EDA Team Route` — the row that ties those four together |
+
+**That one row is the entire design: routing is data, not logic.** The flow asks the table "where does
+this group go?" and the table answers with a stream UUID and a credential alias. A new team is a new
+answer, not new branching — which is why there is no If/Else in the flow and why team count never
+changes its shape.
+
+> ✅ **Verified on the real Team C build, 2026-09-30.** The flow was last modified 2026-09-29 14:27 and
+> the action 2026-09-29 16:40 — both *before* Team C existed. The only scoped-app records touched that
+> day were the Team C alias and its connection mapping. The claim above is measured, not intended.
+
+### The short version
+
+If you have done this before, this is the whole job. Each line links to the detail below.
+
+```
+[ ] 0  Rulebook: copy team_b_rulebook.yml -> team_c_rulebook.yml, change 5 values, PUSH
+[ ] 1  Token:    openssl rand -hex 32                        (64 chars, vault it)
+[ ] 2  AAP exec: org -> inventory -> credentials -> project -> job template
+          ^ Playbook = servicenow_incident_handler.yml   NOT the rulebook
+          ^ Prompt on launch = ON
+[ ] 3  AAP dec:  EDA creds -> DE -> EDA project -> stream credential (token BARE)
+                 -> event stream sn-team-c -> activation      (copy the stream UUID)
+[ ] 4  SN:       group Team-C (Global) -> API Key cred -> alias -> HTTP connection
+                 -> ONE row in EDA Team Route
+[ ] 5  Test:     new incident, group Team-C, caller Event Management
+          ^ sn-team-c increments AND sn-team-a / sn-team-b stay flat
+```
+
+**Four things fail silently; everything else throws.** Push before Phase 3 (the source mapping pins to
+the rulebook's SHA), the job template's *Playbook* field, *Prompt on launch*, and storing the token
+with a `Bearer ` prefix. If something is wrong and nothing is complaining, it is one of those four.
+
+Everything below is the click-by-click version for someone who has not done it before. Do the phases
+in order — each needs something the previous one made.
 
 ### The names you will use
 
@@ -913,8 +956,15 @@ organization → inventory → credentials → project → job template.
 > ⚠️ **Do not forget *Prompt on launch* on the job template.** Without it the controller discards the
 > variables the rulebook sends and the job fails on undefined variables with nothing explaining why.
 
-> ✅ **Verify:** the project shows **Successful** with a revision hash, and the job template's name is
-> character-identical to `run_job_template.name` in your new rulebook.
+> ⚠️ **`Playbook` = `servicenow_incident_handler.yml`, not `rulebooks/team_c_rulebook.yml`.** The
+> dropdown lists both, because the controller project is this same repo. **Every team runs the same
+> playbook** — the per-team file is the *rulebook*, chosen on the activation in Phase 3. Picking the
+> rulebook here fails at event time with `ERROR! 'sources' is not a valid attribute for a Play`, which
+> sends you debugging the rulebook instead of this field. See [README 2.5](../README.md#25-create-the-job-template).
+
+> ✅ **Verify:** the project shows **Successful** with a revision hash; the job template's name is
+> character-identical to `run_job_template.name` in your new rulebook; and its **Playbook** field is
+> `servicenow_incident_handler.yml` with no `rulebooks/` prefix.
 
 ### Phase 3 — AAP, Automation Decisions side
 
@@ -978,6 +1028,7 @@ just that Team C works.
 | Event stream 401/403 | Token mismatch. Compare lengths — 64 chars — and confirm no prefix on either side |
 | Stream counter moves, no job | Rulebook mismatch. Compare the condition's stream name and `run_job_template.name` |
 | Job fails on undefined variables | *Prompt on launch* is off on the job template |
+| `ERROR! 'sources' is not a valid attribute for a Play` | The job template's **Playbook** is a rulebook. Set it to `servicenow_incident_handler.yml` (Phase 2) |
 | `target_team` blank | Step 1 of the action is missing its `team_code` input (§6.1) — affects all teams, not just C |
 
 ## 10. Making routing smarter later
