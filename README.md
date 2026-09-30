@@ -476,6 +476,26 @@ _Automation Execution project pointing at this repo_
 > mismatch produces a job-template-not-found error at launch time, which reads like a permissions
 > problem. Compare against the `name:` field in `rulebooks/team_<x>_rulebook.yml`.
 
+> ⚠️ **Pick the playbook, not the rulebook — the dropdown offers both.** This controller project is
+> the *same repository* that holds the rulebooks, so `Playbook` lists `rulebooks/team_a_rulebook.yml`,
+> `rulebooks/team_b_rulebook.yml`, and so on right alongside `servicenow_incident_handler.yml`. The
+> team-named ones look like the obvious choice on a job template you just named `<Team> Incident
+> Handler`, and they are the wrong answer every time. **Every team's job template runs the same
+> playbook:** `servicenow_incident_handler.yml`. The per-team part is the rulebook, and that is
+> selected on the *activation* (2.12), never here.
+>
+> The failure is loud but only after an event arrives, so you will see it as a red job rather than as
+> a bad setting:
+>
+> ```
+> ERROR! 'sources' is not a valid attribute for a Play
+> The error appears to be in '/runner/project/rulebooks/team_c_rulebook.yml': line 13, column 3
+> ```
+>
+> A rulebook is not a playbook — `sources:` and `rules:` are not play keywords. If you see that
+> error, nothing is wrong with your rulebook, your event, or your token: change this one field.
+> Hit on the real Team C build, three failed jobs deep.
+
 **On closing the incident.** The playbook gates the close behind `sn_close_incident`, which
 defaults to **`false`**. Both `team_a_rulebook.yml` and `team_b_rulebook.yml` pass `true`, so
 EDA-triggered runs close the incident for either team — verified 2026-09-29 on INC0010017 (job 38)
@@ -491,9 +511,12 @@ ticket.
 _Job template settings. Note the **Prompt on launch** checkbox beside Extra variables — that
 is the one that must be ticked._
 
-> ✅ **Verify:** reopen the template and confirm **Prompt on launch** is ticked beside *Variables*, and
-> that the template name matches the rulebook's `run_job_template.name` **character for character**.
-> Those are the two failures that produce no useful error.
+> ✅ **Verify:** reopen the template and confirm all three:
+> 1. **Prompt on launch** is ticked beside *Variables*
+> 2. The template name matches the rulebook's `run_job_template.name` **character for character**
+> 3. **Playbook** reads `servicenow_incident_handler.yml` — **not** anything under `rulebooks/`
+>
+> The first two produce no useful error at all. The third produces a misleading one.
 
 ### 2.6 Create the EDA credentials
 
@@ -607,12 +630,48 @@ both streams, and rotating one forces rotating both.
 
 | Tool | Best for |
 |---|---|
-| **macOS Keychain** | Anything a local script reads: `security add-generic-password -a "$USER" -s <name> -w -U` |
+| **macOS Keychain** | Anything a local script reads — see below |
 | **Bitwarden** (free tier) | Open source, cross-device, shareable if someone else needs the token |
 | **KeePassXC** | Fully local, no account, when the token must not leave the machine |
 
 Never commit one. `.gitignore` blocks `*.token`, `*.vault`, `.env*`, and `vars/secrets.yml`, but
 that is a backstop, not a plan. For rotation, see Part 7.
+
+#### On macOS: store it in the Keychain
+
+Optional — the AAP and ServiceNow steps work from any OS, and nothing in this guide *requires* a
+local copy of the token. Do this if you want to run the [5.1 stream test](#51-test-the-event-stream-and-token-no-servicenow-involved)
+without pasting a live secret into your terminal.
+
+```bash
+security add-generic-password -a "$USER" -s sandbox-eda-team-c -w -U
+```
+
+> 🔑 **Leave `-w` with no value.** It then prompts, twice, and the token never appears as a command
+> argument — so it never lands in `~/.zsh_history`, and never in `~/.zsh_sessions/*.history`, which
+> are separate files that a `.zsh_history` cleanup misses entirely. Writing
+> `-w "$TOKEN"` or `-w <the hex>` defeats the entire point of vaulting it.
+
+`-U` updates an existing item instead of erroring, so this doubles as the rotation command (Part 7).
+
+Use one item per team, named for the stream — `sandbox-eda-team-a`, `-team-b`, `-team-c`. Read it
+back on demand:
+
+```bash
+security find-generic-password -a "$USER" -s sandbox-eda-team-c -w
+```
+
+To have it in every shell, export it from `~/.zshrc` under a name matching the item:
+
+```bash
+export SANDBOX_EDA_TEAM_C_TOKEN="$(security find-generic-password -a "$USER" -s sandbox-eda-team-c -w 2>/dev/null)"
+```
+
+> ⚠️ `~/.zshrc` is only sourced for **interactive** shells. A tool launched from the macOS Dock
+> rather than a terminal inherits none of these variables, and the failure looks like a bad token
+> rather than a missing one. Also note a new export is invisible to already-running processes —
+> start a fresh login shell (`exec zsh -l`) and confirm with `echo ${#SANDBOX_EDA_TEAM_C_TOKEN}`,
+> which must print **64**.
 
 > ✅ **Verify:** the token is exactly **64 characters**. Anything shorter means the copy was truncated.
 
@@ -1612,16 +1671,26 @@ use a disposable ticket.
 ```bash
 curl -sk -X POST -w '\nHTTP:%{http_code}\n' \
   -H 'Content-Type: application/json' \
-  -H 'Authorization: YOUR_TOKEN' \
+  -H "Authorization: $SANDBOX_EDA_TEAM_C_TOKEN" \
   'https://<your-aap-host>/eda-event-streams/api/eda/v1/external_event_stream/<uuid>/post/' \
   -d '{"event_type":"incident_created","incident_number":"CURLTEST","short_description":"test","priority":"3","cmdb_ci":"host01","state":"New","assigned_to":"admin","category":"Inquiry","sys_id":"0000test"}'
 ```
+
+> 🔑 **Reference the token, don't paste it.** The header is in double quotes so the shell expands the
+> variable — from [2.9's Keychain export](#on-macos-store-it-in-the-keychain), or any
+> `TOKEN=$(...)` of your own. Typing the literal hex here puts a live credential in your shell
+> history, which is the one copy nobody remembers to rotate. Note the value is the **bare** token
+> with no `Bearer ` prefix.
+>
+> If this returns `403`, check the variable actually resolved before suspecting the token —
+> `echo ${#SANDBOX_EDA_TEAM_C_TOKEN}` must print `64`. An unset variable expands to empty, which
+> sends a present-but-blank header and reads as a mismatch rather than as a missing token.
 
 | Result | Meaning |
 |---|---|
 | `200` | token and URL are correct |
 | `400 Authorization header is missing` | no header sent |
-| `403` | token mismatch — the header value is not byte-identical to the stored token |
+| `403` | token mismatch — the header value is not byte-identical to the stored token. Or the variable was unset and expanded to empty |
 | `404` | wrong URL |
 
 Send **all** the fields the rulebook maps. A minimal two-field payload matches the rule and
@@ -1791,9 +1860,15 @@ problem as the sync failure; see the CR patch in
 1. Generate a new value: `openssl rand -hex 32`
 2. Update that team's **AAP** event stream credential first
 3. Update that team's **ServiceNow** API Key credential to the new token, **bare**
+4. On macOS, update the Keychain item too — the same
+   [`add-generic-password ... -U`](#on-macos-store-it-in-the-keychain) command overwrites in place.
+   A stale local copy makes the 5.1 test fail against a stream that is actually healthy
 
 Posts between the two saves will fail with 403. Do it during a quiet window and verify
 afterwards.
+
+**Rotating one team's token affects only that team** — that is the point of one token per stream
+(8.5). Do not rotate all of them together out of caution; you multiply the 403 window for no gain.
 
 ### After rebuilding the AAP instance
 
