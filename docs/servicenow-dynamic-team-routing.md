@@ -54,14 +54,14 @@ Budget roughly 2–3 hours for a first pass. Steps 5.2 and 5.7 are where mistake
 Verified in the PDI 2026-09-28. The REST step stores these as separate fields — which is what makes
 one step serve every team.
 
-The "Before" column records the **single-stream state this change replaced**, for contrast. Those two
-values no longer exist: `Ansible EDA Token Alias` is a legacy record and stream `25c68345…` has been
-deleted. Both fields now carry pills fed from the route table.
+The "Before" column records the **single-stream state this change replaced**, for contrast. **Neither
+value exists any more** — both the alias and the stream were deleted 2026-09-30, along with the rest of
+the single-team objects. Both fields now carry pills fed from the route table.
 
 | Field | Before (single shared stream) | Pill? |
 |---|---|---|
-| `connection_alias` | `14a6516a…` (`Ansible EDA Token Alias`, now legacy) | **yes** |
-| `resource_path` | `eda-event-streams/api/eda/v1/external_event_stream/25c68345…/post/` — stream now deleted | **yes** |
+| `connection_alias` | `14a6516a…` (`Ansible EDA Token Alias` — **deleted**) | **yes** |
+| `resource_path` | `eda-event-streams/api/eda/v1/external_event_stream/25c68345…/post/` (stream **deleted**) | **yes** |
 | `base_url` | gateway host | static is fine — one gateway for all teams |
 | `headers` | `User-Agent`, `Content-Type` — **no `Authorization`** | — |
 
