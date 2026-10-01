@@ -3,7 +3,7 @@
 
 **Historical record and reference.** Not a worklist — the build it described is finished. This
 covers the personal lab (ServiceNow PDI `dev211593.service-now.com` + Red Hat Developer Sandbox AAP
-**2.7**), not a Centene system. No SOX/change-control framing applies here.
+**2.7**), not a corporate system. No enterprise change-control framing applies here.
 
 **Gateway:** `https://sandbox-aap-jdrebel2-dev.apps.rm1.0a51.p1.openshiftapps.com`
 
@@ -65,7 +65,7 @@ AAP enforces organization scoping **inconsistently** between object types:
 | Inventory | **Allowed** | `PATCH .../job_templates/11/ {"inventory":1}` → `HTTP 200`. Team A's template happily used `Demo Inventory` from `Default` |
 
 So an organization is a **hard boundary for secrets and a soft one for everything else**. Do not
-present "it's in a different org" as a blanket isolation guarantee in the Centene design — the
+present "it's in a different org" as a blanket isolation guarantee in an enterprise design — the
 guarantee holds for credentials specifically, which is the part that matters most, but it is not a
 general property. The per-org inventories in this lab are a deliberate hygiene choice, not something
 AAP forced.
