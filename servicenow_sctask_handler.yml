@@ -1,0 +1,208 @@
+---
+# Catalog task (SCTASK) counterpart to servicenow_incident_handler.yml.
+#
+# Launched by "Team <X> SCTASK Handler", which every team's rulebook calls by name
+# from its `Launch Team <X> SCTASK handler` rule. One playbook serves every team --
+# the per-team part is the rulebook and the job template, never this file.
+#
+# Why ansible.builtin.uri rather than a servicenow.itsm module for the close:
+# the collection ships incident, problem, change_request and their *_task variants
+# but no catalog-task module, so there is no equivalent of servicenow.itsm.incident
+# to call here. Closing a catalog task is only `state` plus `close_notes`, so the
+# Table API is unambiguous and needs none of the choice-list mapping the incident
+# playbook carries. This also adds no new collection dependency.
+- name: ServiceNow Catalog Task Remediation
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    # Injected as an extra var by the custom ServiceNow credential type, which needs
+    # a `host` input and an `SN_HOST` injector. See README Part 1.1. Never hardcode
+    # the instance: the same playbook is run by more than one organization.
+    sn_instance: "{{ SN_HOST }}"
+
+    # Closing is OFF by default, deliberately -- the same reasoning as the incident
+    # playbook. The rulebook passes `sn_close_task: true`; a manual launch does not,
+    # so you can exercise the skip path without touching a real record.
+    sn_close_task: false
+
+    # sc_task inherits its state choices from `task`. Verified on this instance:
+    #   1  Open                 2  Work in Progress    3  Closed Complete
+    #   4  Closed Incomplete    7  Closed Skipped     -5  Pending
+    # Sent as an integer, not a display name -- the Table API wants the value.
+    sctask_state_closed_complete: 3
+
+    # Defaults so a MANUAL launch does not fail on an undefined variable. Extra vars
+    # from the rulebook override every one of these, so this costs nothing at run
+    # time and makes the template testable on its own (README 5.2).
+    task_number: ""
+    short_description: ""
+    sys_id: ""
+    catalog_item: ""
+    assignment_group: ""
+    target_team: ""
+    source_stream: ""
+
+  tasks:
+    # Without this, a missing SN_HOST surfaces as a raw undefined-variable error
+    # inside a uri task, which reads like a network problem rather than a
+    # credential-type problem.
+    - name: Assert the ServiceNow host was injected by the credential
+      ansible.builtin.assert:
+        that:
+          - SN_HOST is defined
+          - SN_HOST | length > 0
+        fail_msg: >-
+          SN_HOST is not set. Add a `host` input and an `SN_HOST` extra_vars
+          injector to the custom ServiceNow credential type, then re-save the
+          ServiceNow PDI credential with the instance URL (including https://).
+        success_msg: "ServiceNow host resolved from credential: {{ sn_instance }}"
+      tags:
+        - always
+
+    - name: Display catalog task information
+      ansible.builtin.debug:
+        msg:
+          - "============================================"
+          - "ServiceNow Catalog Task Automation Triggered"
+          - "============================================"
+          - "Task Number: {{ task_number }}"
+          - "Description: {{ short_description }}"
+          - "Catalog Item: {{ catalog_item }}"
+          - "Assignment Group: {{ assignment_group }}"
+          - "Target Team: {{ target_team }}"
+          - "Delivered By Stream: {{ source_stream }}"
+          - "sys_id: {{ sys_id }}"
+          - "============================================"
+
+    # target_team empty is the signature of the action's `team_code` input being
+    # declared but never pill-mapped -- it produces no error anywhere else, so say
+    # so here rather than letting it pass silently.
+    - name: Warn when the routing keys did not arrive
+      ansible.builtin.debug:
+        msg: >-
+          target_team is empty. The ServiceNow action's `team_code` input is
+          probably declared but not mapped to a pill. Routing still worked (this
+          job ran), but the audit trail on the record will not say which team.
+      when: target_team | length == 0
+
+    - name: Determine the remediation path for this catalog item
+      ansible.builtin.set_fact:
+        # Branch on the catalog item, which is what makes an SCTASK different from
+        # an incident: the work is defined by what was ordered, not by a symptom.
+        remediation_type: >-
+          {{ 'provision' if 'laptop' in catalog_item | lower
+             else 'access' if 'access' in catalog_item | lower
+             else 'generic' }}
+
+    - name: Execute provisioning fulfilment
+      ansible.builtin.debug:
+        msg: "Provisioning for '{{ catalog_item }}' on task {{ task_number }}"
+      when: remediation_type == 'provision'
+      # Add the real fulfilment tasks here.
+
+    - name: Execute access-request fulfilment
+      ansible.builtin.debug:
+        msg: "Granting access for '{{ catalog_item }}' on task {{ task_number }}"
+      when: remediation_type == 'access'
+      # Add the real fulfilment tasks here.
+
+    - name: Execute generic fulfilment
+      ansible.builtin.debug:
+        msg: "Running generic fulfilment for '{{ catalog_item }}' on task {{ task_number }}"
+      when: remediation_type == 'generic'
+      # Add the real fulfilment tasks here.
+
+    - name: Write a work note back to the catalog task
+      ansible.builtin.uri:
+        url: "{{ sn_instance }}/api/now/table/sc_task/{{ sys_id }}"
+        method: PATCH
+        headers:
+          Content-Type: "application/json"
+        user: "{{ SN_USERNAME }}"
+        password: "{{ SN_PASSWORD }}"
+        force_basic_auth: true
+        body_format: json
+        body:
+          work_notes: >-
+            Ansible Automation completed at {{ lookup('pipe', 'TZ=America/Chicago date "+%Y-%m-%d %H:%M:%S %Z"') }}
+        validate_certs: false
+        # 404 is tolerated on purpose: it means this sys_id is not on the instance,
+        # which is the normal result for a synthetic smoke-test event. If 404 were
+        # fatal the play would abort here and never reach the close gate below, so
+        # the skip path could not be tested at all.
+        #
+        # 401/403 are deliberately NOT tolerated. A 401 here is almost always a
+        # missing snc_basic_auth_api_access role on the account rather than a wrong
+        # password, and swallowing it would hide a real misconfiguration.
+        status_code:
+          - 200
+          - 404
+      when:
+        - sys_id is defined
+        - sys_id | length > 0
+      register: servicenow_update
+
+    - name: Log the work-note result
+      ansible.builtin.debug:
+        msg: >-
+          {% if servicenow_update is skipped -%}
+            No sys_id supplied, so no work note was written.
+          {%- elif servicenow_update.status == 404 -%}
+            sys_id {{ sys_id }} does not exist in {{ sn_instance }} (HTTP 404). No work
+            note was written. Expected for a synthetic test event; investigate if this
+            came from a real catalog task.
+          {%- else -%}
+            Catalog task {{ task_number | default('(unknown)') }} updated successfully
+            (HTTP {{ servicenow_update.status }}).
+          {%- endif %}
+
+    - name: Close Complete the catalog task
+      ansible.builtin.uri:
+        url: "{{ sn_instance }}/api/now/table/sc_task/{{ sys_id }}"
+        method: PATCH
+        headers:
+          Content-Type: "application/json"
+        user: "{{ SN_USERNAME }}"
+        password: "{{ SN_PASSWORD }}"
+        force_basic_auth: true
+        body_format: json
+        body:
+          state: "{{ sctask_state_closed_complete }}"
+          close_notes: >-
+            Closed by Ansible Automation. Fulfilment path: {{ remediation_type }}.
+        validate_certs: false
+        status_code:
+          - 200
+      when:
+        - sn_close_task | bool
+        - sys_id is defined
+        - sys_id | length > 0
+        # Do not try to close a record the PATCH above just proved does not exist.
+        - servicenow_update.status | default(0) == 200
+      register: task_closure
+
+    # Says WHICH gate stopped the close. Without this a skipped close is invisible
+    # in the job output and looks identical to a close that silently did nothing.
+    - name: Report that the catalog task close was skipped
+      ansible.builtin.debug:
+        msg: >-
+          Catalog task {{ task_number | default('(unknown)') }} was NOT closed --
+          {% if not (sn_close_task | bool) -%}
+            sn_close_task is false. Pass -e sn_close_task=true to close it.
+          {%- elif not (sys_id is defined and sys_id | length > 0) -%}
+            no sys_id was supplied.
+          {%- else -%}
+            sys_id {{ sys_id }} was not found in {{ sn_instance }} (the work-note PATCH
+            returned {{ servicenow_update.status | default('n/a') }}).
+          {%- endif %}
+      when: task_closure is skipped
+
+    - name: Print catalog task closure information
+      ansible.builtin.debug:
+        msg:
+          - "========= Catalog Task Closure Information ========="
+          - "Task Number: {{ task_number }}"
+          - "State: Closed Complete ({{ sctask_state_closed_complete }})"
+          - "Task URL: {{ sn_instance }}/sc_task.do?sys_id={{ sys_id }}"
+      when: task_closure is not skipped
