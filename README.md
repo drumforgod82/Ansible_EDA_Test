@@ -989,13 +989,10 @@ returns nothing or a table will not appear in a picker.
 | A scoped script touching a global table needs a `sys_scope_privilege` record | Runtime failure that reads like a code bug. This build needs **read** on `incident`, `em_alert`, and `sys_user_group` — see [§7 of the routing guide](docs/servicenow-dynamic-team-routing.md) |
 | Scoped flow and action components are **invisible to cross-scope Table API queries** | Verified 2026-09-29: `sys_hub_action_instance` returns 0 rows for this scope while returning rows for others. It is not a permission error and not a bad field name. Inspect step definitions in the UI or via execution details, not the API |
 
-> **If you promote this pattern to a Centene instance**, additional governance applies that does
-> not apply to a PDI: apps must be built in App Engine Studio / AEMC, the ACL set must include a
-> dedicated **app admin** role (so platform admins alone cannot reach the data), a data-retention
-> plan with **archive and destroy rules** is required at project start, attachments are not
-> permitted, and notifications must use an app-specific email template rather than the BTS or
-> Request Central default. Records with trackable states should extend **Task**. Source:
-> KB0025878, *Scoped App Best Practices*.
+> **If you promote this pattern to a managed enterprise instance**, expect governance that does not
+> apply to a PDI — app-engine build standards, a stricter ACL set, data-retention rules agreed at
+> project start, and constraints on notifications and attachments. Get your platform team's own
+> standards before you start rather than carrying this README's assumptions across.
 
 ### 3.0.1 Create the assignment groups — one per team
 
