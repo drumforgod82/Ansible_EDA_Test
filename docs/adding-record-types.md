@@ -142,7 +142,7 @@ A row then uses **one or the other**, never both: either name an item, or name a
 
 > 🔴 **A guide can never be matched against the item field.** `cat_item` always holds the *individual*
 > item — even for a guide-ordered task — and guide identity lives only in `sc_req_item.order_guide`.
-> Centene originally wrote the condition as `Item → Name is <guide name>`, which compares
+> An earlier production implementation wrote the condition as `Item → Name is <guide name>`, which compares
 > `cat_item.name` to a guide name, returns zero records, and meant **EDA never fired for
 > guide-ordered items at all** — silently, for months. Match `order_guide`, never `cat_item`.
 
@@ -413,7 +413,7 @@ stops the If evaluating, nothing is sent.
 
 > 🔴 **Branch on `Count`, never on `Records is empty`.** The latter compares a record-list object to
 > a string, is always false, and the gate **silently never fires** — every SCTASK reaches EDA. That
-> exact bug shipped on the Centene build.
+> exact bug shipped in a production build.
 
 > 🔴 **Guard the compared column.** Add `Catalog item` **is not empty** as well. A task with no
 > catalog item resolves the pill to empty, generating `catalog_item=`, which matches every row whose

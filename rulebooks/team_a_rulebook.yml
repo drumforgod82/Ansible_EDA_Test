@@ -1,5 +1,5 @@
 ---
-# Team A incident and SCTASKautomation.
+# Team A incident, SCTASK and problem automation.
 #
 # The ansible.eda.webhook source below is a PLACEHOLDER. In AAP the activation's
 # event-stream source mapping replaces it at runtime with eda.builtin.pg_listener
@@ -10,7 +10,10 @@
 #   push -> sync the EDA project -> re-attach the event stream -> restart
 # Skipping the re-attach leaves the activation on the old hash and it fails with
 # "Rulebook has changed since the sources were mapped."
-- name: Team A - ServiceNow incident automation
+# The ruleset name is what `ansible_eda.ruleset` reports on every launched job, so it must not
+# name one record type -- this rulebook handles three. A stale name here is not a functional bug,
+# but it is the first thing you read when diagnosing and it will mislead you.
+- name: Team A - ServiceNow event automation
   hosts: all
   sources:
     - ansible.eda.webhook:
@@ -83,3 +86,29 @@
               # each task to exactly one team, and activation 1 is stopped, so the race
               # cannot occur. Enabled on both teams to keep behaviour symmetric.
               sn_close_task: true
+
+    - name: Launch Team A Problem handler
+      condition: >-
+        event.meta.eda_event_stream_name == "sn-team-a" and
+        event.payload.event_type == "servicenow.problem.created"
+      action:
+        run_job_template:
+          name: "Team A Problem Handler"
+          organization: "Team A"
+          job_args:
+            extra_vars:
+              problem_number: "{{ event.payload.problem_number | default('') }}"
+              short_description: "{{ event.payload.short_description | default('') }}"
+              assignment_group: "{{ event.payload.assignment_group | default('') }}"
+              cmdb_ci: "{{ event.payload.cmdb_ci | default('') }}"
+              sys_id: "{{ event.payload.sys_id | default('') }}"
+              # Reserved routing keys, carried through for audit and debugging.
+              event_version: "{{ event.payload.event_version | default('') }}"
+              source: "{{ event.payload.source | default('') }}"
+              target_team: "{{ event.payload.target_team | default('') }}"
+              # Which stream actually delivered this event.
+              source_stream: "{{ event.meta.eda_event_stream_name | default('') }}"
+              # sn_resolve_problem, NOT sn_close_problem: the playbook targets Resolved (106) and
+              # leaves the formal close to problem management. The playbook defaults it to false so
+              # a manual launch cannot move a real record.
+              sn_resolve_problem: true

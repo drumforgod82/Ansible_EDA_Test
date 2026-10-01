@@ -1,0 +1,282 @@
+---
+# Problem counterpart to servicenow_incident_handler.yml and servicenow_sctask_handler.yml.
+#
+# Launched by "Team <X> Problem Handler", which every team's rulebook calls by name from its
+# `Launch Team <X> Problem handler` rule. One playbook serves every team -- the per-team part is
+# the rulebook and the job template, never this file.
+#
+# Problem needs no enrollment table: problems have no catalog item, so the assignment group is the
+# only filter and the EDA Team Route table already provides it.
+#
+# WHY THIS USES ansible.builtin.uri AND NOT servicenow.itsm.problem
+# -----------------------------------------------------------------
+# servicenow.itsm.problem exists (unlike catalog task), so the obvious move is to mirror the
+# incident playbook and call the module. It will not work on this instance as it stands.
+#
+# Since the ServiceNow *Rome* release the Table API no longer performs problem state transitions,
+# so the module routes them through a server-side scripted REST API at `/api/x_rhtpp_ansible/problem`
+# (the module's `base_api_path` default). That endpoint ships in the ServiceNow Store application
+# "API for Red Hat Ansible Automation Platform Certified Content Collection", which is NOT installed
+# here -- verified 2026-10-01: no `x_rhtpp_ansible` scope exists in sys_scope, and no scripted REST
+# API answers on that base URI. Calling the module would 404 inside the collection with an error that
+# reads like a credential or network fault rather than a missing application.
+#
+# So the close below is a plain Table API PATCH, and it does not assume it succeeded: it reads the
+# record back and reports what the instance actually did. If the Problem state model rejects a direct
+# transition, the job says so in one line instead of reporting a false success. Two ways forward then:
+#   1. Install the Store application above, then swap this task for servicenow.itsm.problem.
+#   2. Walk the states in order (104 Fix in Progress -> 106 Resolved) rather than jumping.
+- name: ServiceNow Problem Remediation
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    # Injected as an extra var by the custom ServiceNow credential type, which needs a `host` input
+    # and an `SN_HOST` injector. See README Part 1.1. Never hardcode the instance: the same playbook
+    # is run by more than one organization.
+    sn_instance: "{{ SN_HOST }}"
+
+    # Resolving is OFF by default, deliberately -- the same reasoning as the other two playbooks.
+    # The rulebook passes `sn_resolve_problem: true`; a manual launch does not, so the skip path is
+    # testable without touching a real record.
+    sn_resolve_problem: false
+
+    # Problem state choices read off this instance 2026-10-01 (sys_choice, name=problem^element=state):
+    #   101 New   102 Assess   103 Root Cause Analysis   104 Fix in Progress   106 Resolved   107 Closed
+    # There is no active Cancelled choice here, unlike incident. Sent as the integer value, not the
+    # display name -- the Table API wants the value.
+    problem_state_resolved: 106
+    problem_state_closed: 107
+
+    # Resolved is the target rather than Closed: it is the natural end state for automated
+    # remediation and leaves the human close to problem management. Override to
+    # `problem_state_closed` if you want the full close.
+    problem_state_target: "{{ problem_state_resolved }}"
+
+    # resolution_code choices on this instance: fix_applied, risk_accepted, canceled, duplicate.
+    # fix_applied is the only one that describes automation having done something, and it is the
+    # code that requires both cause_notes and fix_notes.
+    problem_resolution_code: fix_applied
+
+    # Defaults so a MANUAL launch does not fail on an undefined variable. Extra vars from the
+    # rulebook override every one of these, so this costs nothing at run time and makes the job
+    # template testable on its own.
+    problem_number: ""
+    short_description: ""
+    sys_id: ""
+    assignment_group: ""
+    cmdb_ci: ""
+    target_team: ""
+    source_stream: ""
+
+  tasks:
+    # Without this, a missing SN_HOST surfaces as a raw undefined-variable error inside a uri task,
+    # which reads like a network problem rather than a credential-type problem.
+    - name: Assert the ServiceNow host was injected by the credential
+      ansible.builtin.assert:
+        that:
+          - SN_HOST is defined
+          - SN_HOST | length > 0
+        fail_msg: >-
+          SN_HOST is not set. Add a `host` input and an `SN_HOST` extra_vars injector to the custom
+          ServiceNow credential type, then re-save the ServiceNow PDI credential with the instance
+          URL (including https://).
+        success_msg: "ServiceNow host resolved from credential: {{ sn_instance }}"
+      tags:
+        - always
+
+    - name: Display problem information
+      ansible.builtin.debug:
+        msg:
+          - "======================================"
+          - "ServiceNow Problem Automation Triggered"
+          - "======================================"
+          - "Problem Number: {{ problem_number }}"
+          - "Description: {{ short_description }}"
+          - "Assignment Group: {{ assignment_group }}"
+          - "CI: {{ cmdb_ci }}"
+          - "Target Team: {{ target_team }}"
+          - "Delivered By Stream: {{ source_stream }}"
+          - "sys_id: {{ sys_id }}"
+          - "======================================"
+
+    # target_team empty is the signature of the action's `team_code` input being declared but never
+    # pill-mapped -- it produces no error anywhere else, so say so here rather than letting it pass.
+    - name: Warn when the routing keys did not arrive
+      ansible.builtin.debug:
+        msg: >-
+          target_team is empty. The ServiceNow action's `team_code` input is probably declared but
+          not mapped to a pill. Routing still worked (this job ran), but the audit trail on the
+          record will not say which team.
+      when: target_team | length == 0
+
+    - name: Determine the investigation path for this problem
+      ansible.builtin.set_fact:
+        # Branch on the symptom, as the incident playbook does. A problem is a root-cause record,
+        # so the useful split is by failure domain rather than by what was ordered.
+        investigation_type: >-
+          {{ 'capacity' if ('disk' in short_description | lower or 'memory' in short_description | lower)
+             else 'availability' if ('down' in short_description | lower or 'outage' in short_description | lower)
+             else 'generic' }}
+
+    - name: Execute capacity investigation
+      ansible.builtin.debug:
+        msg: "Collecting capacity trend data for {{ cmdb_ci | default('(no CI)', true) }} on {{ problem_number }}"
+      when: investigation_type == 'capacity'
+      # Add the real investigation tasks here.
+
+    - name: Execute availability investigation
+      ansible.builtin.debug:
+        msg: "Collecting availability history for {{ cmdb_ci | default('(no CI)', true) }} on {{ problem_number }}"
+      when: investigation_type == 'availability'
+      # Add the real investigation tasks here.
+
+    - name: Execute generic investigation
+      ansible.builtin.debug:
+        msg: "Running generic root-cause collection for {{ problem_number }}"
+      when: investigation_type == 'generic'
+      # Add the real investigation tasks here.
+
+    - name: Write a work note back to the problem
+      ansible.builtin.uri:
+        url: "{{ sn_instance }}/api/now/table/problem/{{ sys_id }}"
+        method: PATCH
+        headers:
+          Content-Type: "application/json"
+        user: "{{ SN_USERNAME }}"
+        password: "{{ SN_PASSWORD }}"
+        force_basic_auth: true
+        body_format: json
+        body:
+          work_notes: >-
+            Ansible Automation completed at {{ lookup('pipe', 'TZ=America/Chicago date "+%Y-%m-%d %H:%M:%S %Z"') }}
+        validate_certs: false
+        # 404 is tolerated on purpose: it means this sys_id is not on the instance, which is the
+        # normal result for a synthetic smoke-test event. If 404 were fatal the play would abort
+        # here and never reach the resolve gate below, so the skip path could not be tested.
+        #
+        # 401/403 are deliberately NOT tolerated. A 401 here is almost always a missing
+        # snc_basic_auth_api_access role on the account rather than a wrong password, and
+        # swallowing it would hide a real misconfiguration.
+        status_code:
+          - 200
+          - 404
+      when:
+        - sys_id is defined
+        - sys_id | length > 0
+      register: servicenow_update
+
+    - name: Log the work-note result
+      ansible.builtin.debug:
+        msg: >-
+          {% if servicenow_update is skipped -%}
+            No sys_id supplied, so no work note was written.
+          {%- elif servicenow_update.status == 404 -%}
+            sys_id {{ sys_id }} does not exist in {{ sn_instance }} (HTTP 404). No work note was
+            written. Expected for a synthetic test event; investigate if this came from a real problem.
+          {%- else -%}
+            Problem {{ problem_number | default('(unknown)') }} updated successfully
+            (HTTP {{ servicenow_update.status }}).
+          {%- endif %}
+
+    # failed_when: false because the Problem state model -- not the credential, not the network --
+    # is the thing most likely to refuse this, and a hard failure here would hide the read-back
+    # below that tells us which it was.
+    - name: Resolve the problem
+      ansible.builtin.uri:
+        url: "{{ sn_instance }}/api/now/table/problem/{{ sys_id }}"
+        method: PATCH
+        headers:
+          Content-Type: "application/json"
+        user: "{{ SN_USERNAME }}"
+        password: "{{ SN_PASSWORD }}"
+        force_basic_auth: true
+        body_format: json
+        body:
+          state: "{{ problem_state_target }}"
+          resolution_code: "{{ problem_resolution_code }}"
+          # fix_applied requires both of these. Sending them unconditionally is harmless for the
+          # other codes and avoids a mandatory-field rejection that looks like a permission error.
+          cause_notes: >-
+            Root cause collection run by Ansible Automation. Investigation path: {{ investigation_type }}.
+          fix_notes: >-
+            Resolved by Ansible Automation at {{ lookup('pipe', 'TZ=America/Chicago date "+%Y-%m-%d %H:%M:%S %Z"') }}.
+          close_notes: >-
+            Resolved by Ansible Automation. Investigation path: {{ investigation_type }}.
+        validate_certs: false
+        status_code:
+          - 200
+      failed_when: false
+      when:
+        - sn_resolve_problem | bool
+        - sys_id is defined
+        - sys_id | length > 0
+        # Do not try to resolve a record the PATCH above just proved does not exist.
+        - servicenow_update.status | default(0) == 200
+      register: problem_resolution
+
+    # The PATCH returning 200 is not proof the state moved -- a state model can accept the write and
+    # leave `state` untouched. Read it back rather than trusting the status code.
+    - name: Read the problem back to confirm the state actually moved
+      ansible.builtin.uri:
+        url: "{{ sn_instance }}/api/now/table/problem/{{ sys_id }}?sysparm_fields=number,state,resolution_code&sysparm_display_value=all"
+        method: GET
+        user: "{{ SN_USERNAME }}"
+        password: "{{ SN_PASSWORD }}"
+        force_basic_auth: true
+        validate_certs: false
+        status_code:
+          - 200
+      when: problem_resolution is not skipped
+      register: problem_readback
+
+    - name: Report the resolve outcome
+      ansible.builtin.debug:
+        msg: >-
+          {% set observed = problem_readback.json.result.state.value | default('') | string -%}
+          {% if problem_resolution.status | default(0) != 200 -%}
+            Problem {{ problem_number | default('(unknown)') }} was NOT resolved -- the Table API
+            returned HTTP {{ problem_resolution.status | default('n/a') }}. If this is a 403 or 400,
+            the Problem state model refused a direct transition: install the ServiceNow Store
+            application "API for Red Hat Ansible Automation Platform Certified Content Collection"
+            and switch this task to servicenow.itsm.problem, or walk the states in order.
+          {%- elif observed == problem_state_target | string -%}
+            Problem {{ problem_number | default('(unknown)') }} reached state
+            {{ problem_readback.json.result.state.display_value | default(observed) }}
+            ({{ observed }}) with resolution code
+            {{ problem_readback.json.result.resolution_code.display_value | default('(none)') }}.
+          {%- else -%}
+            Problem {{ problem_number | default('(unknown)') }} accepted the PATCH (HTTP 200) but its
+            state is still
+            {{ problem_readback.json.result.state.display_value | default(observed) }} ({{ observed }}),
+            not the requested {{ problem_state_target }}. The state model silently ignored the
+            transition -- use the Store application and servicenow.itsm.problem, or walk the states
+            in order.
+          {%- endif %}
+      when: problem_resolution is not skipped
+
+    # Says WHICH gate stopped the resolve. Without this a skipped resolve is invisible in the job
+    # output and looks identical to a resolve that silently did nothing.
+    - name: Report that the problem resolve was skipped
+      ansible.builtin.debug:
+        msg: >-
+          Problem {{ problem_number | default('(unknown)') }} was NOT resolved --
+          {% if not (sn_resolve_problem | bool) -%}
+            sn_resolve_problem is false. Pass -e sn_resolve_problem=true to resolve it.
+          {%- elif not (sys_id is defined and sys_id | length > 0) -%}
+            no sys_id was supplied.
+          {%- else -%}
+            sys_id {{ sys_id }} was not found in {{ sn_instance }} (the work-note PATCH returned
+            {{ servicenow_update.status | default('n/a') }}).
+          {%- endif %}
+      when: problem_resolution is skipped
+
+    - name: Print problem closure information
+      ansible.builtin.debug:
+        msg:
+          - "========= Problem Closure Information ========="
+          - "Problem Number: {{ problem_number }}"
+          - "Requested State: {{ problem_state_target }}"
+          - "Observed State: {{ problem_readback.json.result.state.display_value | default('(not read back)') }}"
+          - "Problem URL: {{ sn_instance }}/problem.do?sys_id={{ sys_id }}"
+      when: problem_resolution is not skipped
