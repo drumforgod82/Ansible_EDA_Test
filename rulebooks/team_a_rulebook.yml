@@ -1,5 +1,5 @@
 ---
-# Team A incident automation.
+# Team A incident and SCTASKautomation.
 #
 # The ansible.eda.webhook source below is a PLACEHOLDER. In AAP the activation's
 # event-stream source mapping replaces it at runtime with eda.builtin.pg_listener
@@ -55,3 +55,31 @@
               # each incident to exactly one team, and activation 1 is stopped, so the race
               # cannot occur. Enabled on both teams to keep behaviour symmetric.
               sn_close_incident: true
+
+    - name: Launch Team A SCTASK handler
+      condition: >-
+        event.meta.eda_event_stream_name == "sn-team-a" and
+        event.payload.event_type == "servicenow.sctask.created"
+      action:
+        run_job_template:
+          name: "Team A SCTASK Handler"
+          organization: "Team A"
+          job_args:
+            extra_vars:
+              task_number: "{{ event.payload.task_number | default('') }}"
+              short_description: "{{ event.payload.short_description | default('') }}"
+              catalog_item: "{{ event.payload.catalog_item | default('') }}"
+              assignment_group: "{{ event.payload.assignment_group | default('') }}"
+              sys_id: "{{ event.payload.sys_id | default('') }}"
+              # Reserved routing keys, carried through for audit and debugging.
+              event_version: "{{ event.payload.event_version | default('') }}"
+              source: "{{ event.payload.source | default('') }}"
+              target_team: "{{ event.payload.target_team | default('') }}"
+              # Which stream actually delivered this event.
+              source_stream: "{{ event.meta.eda_event_stream_name | default('') }}"
+              # Close the task. The playbook defaults this to false to stop two orgs
+              # racing to close one task, which was only possible under the old
+              # single-stream fan-out. Per-team streams plus the EDA Team Route table send
+              # each task to exactly one team, and activation 1 is stopped, so the race
+              # cannot occur. Enabled on both teams to keep behaviour symmetric.
+              sn_close_task: true

@@ -1,5 +1,5 @@
 ---
-# Team B incident automation. Deliberately a separate file from team_a_rulebook.yml
+# Team B incident and SCTASKautomation. Deliberately a separate file from team_a_rulebook.yml
 # rather than one parameterised rulebook: in the real world each team owns its own
 # rulebook, and the test should model that.
 #
@@ -50,3 +50,32 @@
               # each incident to exactly one team, and activation 1 is stopped, so the race
               # cannot occur. Enabled on both teams to keep behaviour symmetric.
               sn_close_incident: true
+
+
+    - name: Launch Team B SCTASK handler
+      condition: >-
+        event.meta.eda_event_stream_name == "sn-team-b" and
+        event.payload.event_type == "servicenow.sctask.created"
+      action:
+        run_job_template:
+          name: "Team B SCTASK Handler"
+          organization: "Team B"
+          job_args:
+            extra_vars:
+              task_number: "{{ event.payload.task_number | default('') }}"
+              short_description: "{{ event.payload.short_description | default('') }}"
+              catalog_item: "{{ event.payload.catalog_item | default('') }}"
+              assignment_group: "{{ event.payload.assignment_group | default('') }}"
+              sys_id: "{{ event.payload.sys_id | default('') }}"
+              # Reserved routing keys, carried through for audit and debugging.
+              event_version: "{{ event.payload.event_version | default('') }}"
+              source: "{{ event.payload.source | default('') }}"
+              target_team: "{{ event.payload.target_team | default('') }}"
+              # Which stream actually delivered this event.
+              source_stream: "{{ event.meta.eda_event_stream_name | default('') }}"
+              # Close the task. The playbook defaults this to false to stop two orgs
+              # racing to close one task, which was only possible under the old
+              # single-stream fan-out. Per-team streams plus the EDA Team Route table send
+              # each task to exactly one team, and activation 1 is stopped, so the race
+              # cannot occur. Enabled on both teams to keep behaviour symmetric.
+              sn_close_task: true
