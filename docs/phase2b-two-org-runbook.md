@@ -10,7 +10,9 @@ covers the personal lab (ServiceNow PDI `dev211593.service-now.com` + Red Hat De
 > ### Read this first
 >
 > **Teams A and B are complete**, and Teams C and D have since been built on the same pattern. Each
-> live team passes all 29 checks in [`scripts/verify_team.py`](../scripts/verify_team.py).
+> live team passes [`scripts/verify_team.py`](../scripts/verify_team.py) with no failures. The check
+> total is **not** a fixed number — it scales with how many record types that team's rulebook
+> handles, so Team A and Team C legitimately report different totals.
 >
 > **To build a team, do not use this page.** The click-through steps that used to live here were
 > duplicated by, and drifted out of step with, the canonical versions:

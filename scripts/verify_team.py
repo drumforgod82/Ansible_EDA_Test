@@ -46,10 +46,30 @@ import urllib.parse
 import urllib.request
 from typing import Any, Callable, Iterable
 
-# The playbook every team's job template must run. The per-team file is the *rulebook*, and it is
-# selected on the activation -- never here. Picking a rulebook fails with
-# "ERROR! 'sources' is not a valid attribute for a Play" only once an event arrives.
-SHARED_PLAYBOOK = "servicenow_incident_handler.yml"
+class RecordType:
+    """One ServiceNow record type this lab automates.
+
+    ``playbook`` is shared by every team -- the per-team file is the *rulebook*, selected on the
+    activation, never here. Pointing a job template at a rulebook fails with
+    "ERROR! 'sources' is not a valid attribute for a Play" only once an event arrives.
+
+    ``event_type`` is the contract string the rulebook's condition tests. It is also how this script
+    works out which record types a team has: see ``detect_record_types``.
+    """
+
+    def __init__(self, key: str, template_suffix: str, playbook: str, event_type: str) -> None:
+        self.key = key
+        self.template_suffix = template_suffix
+        self.playbook = playbook
+        self.event_type = event_type
+
+
+# Order matters only for display.
+RECORD_TYPES: tuple[RecordType, ...] = (
+    RecordType("incident", "Incident Handler", "servicenow_incident_handler.yml", "servicenow.incident.created"),
+    RecordType("sctask", "SCTASK Handler", "servicenow_sctask_handler.yml", "servicenow.sctask.created"),
+    RecordType("problem", "Problem Handler", "servicenow_problem_handler.yml", "servicenow.problem.created"),
+)
 
 # Forwarding this header copies the stream's own bearer token into event.meta.headers, and from
 # there into the job's extra_vars in cleartext. Never forward it.
@@ -66,6 +86,10 @@ class Outcome:
     def __init__(self) -> None:
         self.rows: list[tuple[bool, str, str]] = []
 
+    def __init__(self) -> None:
+        self.rows: list[tuple[bool, str, str]] = []
+        self.notes: list[tuple[str, str]] = []
+
     def record(self, ok: bool, label: str, detail: str = "", info: str = "") -> bool:
         """Record a check. ``detail`` prints only on failure; ``info`` prints either way.
 
@@ -74,6 +98,15 @@ class Outcome:
         """
         self.rows.append((ok, label, info or ("" if ok else detail)))
         return ok
+
+    def note(self, label: str, detail: str = "") -> None:
+        """Record something deliberately not configured. Neither a pass nor a failure.
+
+        This exists so a team that legitimately lacks a record type does not score a FAIL. Team C
+        has no SCTASK job template on purpose, and reporting that as broken would train people to
+        ignore real failures. Notes are excluded from the pass/fail totals so the count stays honest.
+        """
+        self.notes.append((label, detail))
 
     @property
     def failures(self) -> list[tuple[bool, str, str]]:
@@ -86,14 +119,21 @@ class Outcome:
             if detail:
                 for line in detail.splitlines():
                     print(f"        {line}")
+        for label, detail in self.notes:
+            print(f"\033[33m SKIP\033[0m  {label}")
+            if detail:
+                for line in detail.splitlines():
+                    print(f"        {line}")
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "passed": len(self.rows) - len(self.failures),
             "failed": len(self.failures),
+            "skipped": len(self.notes),
             "checks": [
                 {"ok": ok, "label": label, "detail": detail} for ok, label, detail in self.rows
             ],
+            "notes": [{"label": label, "detail": detail} for label, detail in self.notes],
         }
 
 
@@ -112,13 +152,18 @@ class TeamNames:
         letter = team_code.rsplit("-", 1)[1]
         self.letter = letter.upper()
         self.organization = f"Team {self.letter}"
-        self.job_template = f"Team {self.letter} Incident Handler"
         self.stream = f"sn-{team_code}"
         self.assignment_group = f"Team-{self.letter}"
+        # Named "-incidents" before SCTASK and Problem existed. The activation handles all three;
+        # nothing reads this name programmatically, so it is a cosmetic misnomer, not a bug.
         self.activation = f"{team_code}-incidents"
         self.rulebook_file = f"rulebooks/team_{letter}_rulebook.yml"
         self.rulebook_name = f"team_{letter}_rulebook.yml"
         self.controller_project = f"EDA ServiceNow - Team {self.letter}"
+
+    def job_template(self, record_type: RecordType) -> str:
+        """The job template name for one record type. Matched BY STRING by the rulebook."""
+        return f"Team {self.letter} {record_type.template_suffix}"
 
 
 def _request(url: str, headers: dict[str, str]) -> tuple[int, bytes]:
@@ -213,8 +258,26 @@ def raw_field(row: dict[str, Any], key: str) -> str:
 # --------------------------------------------------------------------------------------------
 
 
-def check_rulebook(names: TeamNames, repo_root: str, out: Outcome) -> None:
-    """Check the rulebook on disk: it parses, and it carries no other team's identifiers.
+def detect_record_types(text: str) -> list[RecordType]:
+    """Work out which record types a rulebook actually handles, from its rule conditions.
+
+    DELIBERATELY DRIVEN BY THE RULEBOOK, NOT BY THE JOB TEMPLATES. Detecting from the AAP side
+    would make "the job template exists" tautological -- you found the type by finding its
+    template -- and would miss the one failure that matters most here:
+
+        a rule naming a job template that does not exist.
+
+    That failure is SILENT from ServiceNow. The stream counter moves, the rule fires, no job record
+    is ever created, the record is untouched and nothing is written back. The only evidence is the
+    activation log: "ERROR - Job template X in organization Y does not exist". One real catalog task
+    was stranded that way during the build. Driving detection from the rulebook is what lets this
+    script catch it before an event does.
+    """
+    return [rt for rt in RECORD_TYPES if f'"{rt.event_type}"' in text]
+
+
+def check_rulebook(names: TeamNames, repo_root: str, out: Outcome) -> list[RecordType]:
+    """Check the rulebook on disk and return the record types it handles.
 
     A rulebook copied from a sibling team is still valid YAML and still fires, so a parse check
     alone passes. What breaks is attribution: 'Last rule fired' names the wrong team, which is the
@@ -222,7 +285,7 @@ def check_rulebook(names: TeamNames, repo_root: str, out: Outcome) -> None:
     """
     path = os.path.join(repo_root, names.rulebook_file)
     if not out.record(os.path.isfile(path), f"rulebook {names.rulebook_file} exists"):
-        return
+        return []
 
     with open(path, encoding="utf-8") as handle:
         text = handle.read()
@@ -236,7 +299,7 @@ def check_rulebook(names: TeamNames, repo_root: str, out: Outcome) -> None:
         out.record(True, "rulebook YAML parse skipped (PyYAML not installed)")
     except Exception as exc:  # noqa: BLE001 - surface any parser complaint verbatim
         out.record(False, "rulebook parses as YAML", str(exc))
-        return
+        return []
 
     # Any other team's code or letter appearing here is a copy-paste leftover.
     #
@@ -256,13 +319,58 @@ def check_rulebook(names: TeamNames, repo_root: str, out: Outcome) -> None:
         "\n".join(strays) if strays else "",
     )
 
-    expectations = [
-        (rf'eda_event_stream_name\s*==\s*"{re.escape(names.stream)}"', f'condition tests "{names.stream}"'),
-        (rf'name:\s*"{re.escape(names.job_template)}"', f'run_job_template.name is "{names.job_template}"'),
-        (rf'organization:\s*"{re.escape(names.organization)}"', f'organization is "{names.organization}"'),
-    ]
-    for pattern, label in expectations:
-        out.record(bool(re.search(pattern, text)), f"rulebook {label}")
+    out.record(
+        bool(re.search(rf'eda_event_stream_name\s*==\s*"{re.escape(names.stream)}"', text)),
+        f'rulebook condition tests "{names.stream}"',
+    )
+    out.record(
+        bool(re.search(rf'organization:\s*"{re.escape(names.organization)}"', text)),
+        f'rulebook organization is "{names.organization}"',
+    )
+
+    # The ruleset name is reported as ansible_eda.ruleset on every launched job, so a name that
+    # pins one record type actively misleads whoever is debugging a different one.
+    ruleset = re.search(r"^-\s*name:\s*(.+)$", text, re.M)
+    if ruleset:
+        label = ruleset.group(1).strip().strip("\"'")
+        named_one = [rt.key for rt in RECORD_TYPES if rt.key in label.lower()]
+        out.record(
+            not named_one,
+            "ruleset name does not pin a single record type",
+            f"ruleset is named {label!r}, which names {named_one}. This rulebook handles "
+            f"{len(detect_record_types(text))} record type(s); the name is what ansible_eda.ruleset "
+            "reports on every job, so it will mislead you while debugging the others.",
+        )
+
+    detected = detect_record_types(text)
+    out.record(
+        bool(detected),
+        "rulebook handles at least one record type",
+        "no rule condition matched any known event_type. Expected one of: "
+        + ", ".join(rt.event_type for rt in RECORD_TYPES),
+        info=", ".join(rt.key for rt in detected) if detected else "",
+    )
+
+    # Per record type the rulebook claims: does it name that type's job template, by the exact
+    # string the controller will look up?
+    for rt in detected:
+        expected = names.job_template(rt)
+        out.record(
+            bool(re.search(rf'name:\s*"{re.escape(expected)}"', text)),
+            f'rulebook names job template "{expected}" for {rt.key}',
+            f"the {rt.key} rule exists but no run_job_template.name reads {expected!r}. "
+            "A rule that names a template which does not exist fails SILENTLY -- see the activation log.",
+        )
+
+    for rt in RECORD_TYPES:
+        if rt not in detected:
+            out.note(
+                f"rulebook has no {rt.key} rule",
+                f"no condition tests {rt.event_type!r}. Not a failure -- a team need not handle "
+                "every record type. Nothing below is checked for it.",
+            )
+
+    return detected
 
 
 # --------------------------------------------------------------------------------------------
@@ -270,8 +378,17 @@ def check_rulebook(names: TeamNames, repo_root: str, out: Outcome) -> None:
 # --------------------------------------------------------------------------------------------
 
 
-def check_aap(names: TeamNames, aap: AapClient, repo_root: str, out: Outcome) -> dict[str, Any]:
-    """Check the AAP side and return facts the ServiceNow checks need to compare against."""
+def check_aap(
+    names: TeamNames,
+    aap: AapClient,
+    repo_root: str,
+    out: Outcome,
+    record_types: list[RecordType],
+) -> dict[str, Any]:
+    """Check the AAP side and return facts the ServiceNow checks need to compare against.
+
+    ``record_types`` comes from the rulebook, not from AAP. See ``detect_record_types``.
+    """
     facts: dict[str, Any] = {}
 
     org = aap.first(f"/api/controller/v2/organizations/?name={urllib.parse.quote(names.organization)}")
@@ -289,25 +406,49 @@ def check_aap(names: TeamNames, aap: AapClient, repo_root: str, out: Outcome) ->
             info=f"revision {revision[:12]}" if revision else "",
         )
 
-    template = aap.first(
-        f"/api/controller/v2/job_templates/?name={urllib.parse.quote(names.job_template)}"
-    )
-    if out.record(template is not None, f'job template "{names.job_template}" exists'):
+    # One set of checks per record type the RULEBOOK claims to handle. A type the rulebook does not
+    # mention is skipped entirely -- see detect_record_types for why that is the right direction.
+    for rt in record_types:
+        expected_name = names.job_template(rt)
+
+        # The playbook has to be in the repo as well as named on the template, or the template
+        # points at a file the project sync will never produce.
+        out.record(
+            os.path.isfile(os.path.join(repo_root, rt.playbook)),
+            f"playbook {rt.playbook} exists in the repo",
+            f"the {rt.key} rule exists and names a job template, but {rt.playbook} is not in this\n"
+            "checkout. The controller project will sync without it and the job will fail at launch.",
+        )
+
+        template = aap.first(
+            f"/api/controller/v2/job_templates/?name={urllib.parse.quote(expected_name)}"
+        )
+        if not out.record(
+            template is not None,
+            f'job template "{expected_name}" exists',
+            f"the rulebook has a {rt.key} rule naming this template, but no such template exists in\n"
+            "AAP. This is the SILENT failure: the stream counter will move, the rule will fire, and\n"
+            "NO job record will be created. ServiceNow sees nothing wrong. The only evidence is the\n"
+            f'activation log: "ERROR - Job template {expected_name} in organization '
+            f'{names.organization} does not exist".',
+        ):
+            continue
+
         playbook = template.get("playbook") or ""
         out.record(
-            playbook == SHARED_PLAYBOOK,
-            f"job template runs {SHARED_PLAYBOOK}",
+            playbook == rt.playbook,
+            f'job template "{expected_name}" runs {rt.playbook}',
             ""
-            if playbook == SHARED_PLAYBOOK
+            if playbook == rt.playbook
             else (
                 f"found {playbook!r}. A rulebook is not a playbook -- this fails at event time with\n"
                 "\"ERROR! 'sources' is not a valid attribute for a Play\". Every team runs the same\n"
-                "playbook; the per-team file is the rulebook, chosen on the activation."
+                "playbook per record type; the per-team file is the rulebook, chosen on the activation."
             ),
         )
         out.record(
             bool(template.get("ask_variables_on_launch")),
-            "job template has Prompt on launch enabled",
+            f'job template "{expected_name}" has Prompt on launch enabled',
             ""
             if template.get("ask_variables_on_launch")
             else "without it the controller silently discards every extra_var the rulebook sends",
@@ -323,7 +464,7 @@ def check_aap(names: TeamNames, aap: AapClient, repo_root: str, out: Outcome) ->
         ]
         out.record(
             "ServiceNow" in kinds,
-            "job template has a ServiceNow credential attached",
+            f'job template "{expected_name}" has a ServiceNow credential attached',
             f"attached credential types: {kinds or '(none)'}\n"
             "The playbook needs SN_HOST/SN_USERNAME/SN_PASSWORD injected by a ServiceNow-type\n"
             "credential; without it the work-note write-back fails on undefined variables.",
@@ -620,7 +761,10 @@ def main() -> int:
     if not args.json:
         print(f"\nVerifying {names.code}  (org {names.organization!r}, stream {names.stream!r})\n")
 
-    check_rulebook(names, args.repo_root, out)
+    record_types = check_rulebook(names, args.repo_root, out)
+    if not args.json:
+        configured = " + ".join(rt.key for rt in record_types) or "(none)"
+        print(f"\nRecord types in {names.rulebook_name}: {configured}\n")
 
     aap = AapClient(args.gateway, required["SANDBOX_AAP_PAT_TOKEN"])
     snow = ServiceNowClient(
@@ -628,7 +772,7 @@ def main() -> int:
     )
 
     try:
-        aap_facts = check_aap(names, aap, args.repo_root, out)
+        aap_facts = check_aap(names, aap, args.repo_root, out, record_types)
     except Exception as exc:  # noqa: BLE001 - a transport failure is a result, not a crash
         out.record(False, "AAP checks completed", str(exc))
         aap_facts = {}
@@ -644,11 +788,21 @@ def main() -> int:
         out.render()
         total = len(out.rows)
         failed = len(out.failures)
-        print(f"\n{total - failed}/{total} checks passed.")
+        configured = " + ".join(rt.key for rt in record_types) or "(none)"
+        print(f"\nTeam {names.letter}: {configured}")
+        print(f"{total - failed}/{total} checks passed", end="")
+        print(f", {len(out.notes)} skipped." if out.notes else ".")
+        # The total is intentionally NOT a fixed number. It scales with how many record types the
+        # team's rulebook handles, so quoting "29/29" or "35/35" anywhere would go stale the moment
+        # a team gains or loses one.
         if failed:
-            print(f"{failed} failed -- fix these before creating a test incident.\n")
+            print(f"{failed} failed -- fix these before creating a test record.\n")
         else:
-            print("Wiring looks correct. Now create a test incident and watch the stream counter.\n")
+            print(
+                f"Wiring looks correct for: {configured}.\n"
+                "Now create one test record per type above and watch only this team's stream "
+                "counter move.\n"
+            )
     return 1 if out.failures else 0
 
 

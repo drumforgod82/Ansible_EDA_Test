@@ -1,10 +1,16 @@
 # Ansible_EDA_Test — ServiceNow to Event-Driven Ansible
 
-A complete, working reference for triggering Ansible Automation Platform automation from a
-ServiceNow incident, using **Event-Driven Ansible (EDA)**.
+A complete, working reference for triggering Ansible Automation Platform automation from
+ServiceNow records — **incidents, catalog tasks (SCTASK) and problems** — using
+**Event-Driven Ansible (EDA)**.
 
 This README is written for someone who has never set up EDA before. Every step says what to
 click, what to type, and how to prove it worked.
+
+**It teaches the pattern using incidents**, which is the simplest of the three, and every worked
+example below is an incident. Once incidents work, adding SCTASK and Problem is a separate,
+shorter guide: [Adding a record type](docs/adding-record-types.md). What is shared and what is
+per-record-type is mapped in [§1 below](#1-what-this-does).
 
 > **Verified on:** AAP 2.7 (Operator install on OpenShift) + a ServiceNow Personal Developer
 > Instance (PDI), September 2026. Where AAP 2.6 differs, it is called out.
@@ -37,6 +43,7 @@ This README covers the AAP and ServiceNow object setup. These go further:
 | [Adding a record type](docs/adding-record-types.md) | Adding **SCTASK** and **Problem** alongside incidents for teams that already exist: a catalog-item enrollment table, one new action and flow per record type, a rule per record type in the team rulebook. Routing does not change — the same route row serves every record type for a team. |
 | [Phase 2b two-org runbook](docs/phase2b-two-org-runbook.md) | Standing up two AAP organizations with their own streams, credentials, and activations, in dependency order. Records what AAP does and does not isolate per org. |
 | [AAP EDA project sync fix](aap-eda-project-sync-fix.md) | Diagnosing an EDA project sync stuck in `Pending` — the default worker is OOMKilled mid-clone at 400Mi. |
+| [Git workflow](docs/git-workflow.md) | **Read before your second PR.** Squash-merge to a protected `main` plus a no-force ruleset on `dev` makes `dev` diverge on every PR, and a tree comparison does not predict it. The one-line habit that prevents it, three ways to remove the cause, and what to sync after a merge — playbook changes need no re-attach, rulebook changes need the full cycle. |
 
 Scripts pasted into ServiceNow live in [`docs/scripts/`](docs/scripts/) and are the canonical
 copies. Paste from those files rather than from a rendered page.
@@ -47,7 +54,7 @@ Two Python tools, stdlib only. Both take `--gateway` or read `AAP_GATEWAY`.
 
 | Tool | What it does |
 |---|---|
-| [`verify_team.py`](scripts/verify_team.py) | **Read-only.** 29 checks across the repo, AAP and ServiceNow for one team, including a comparison of the route row's `event_stream_uuid` against the real AAP stream UUID, and of the activation's pinned `rulebook_hash` against the rulebook at the project's synced revision. Exits non-zero on any failure; `--json` for CI |
+| [`verify_team.py`](scripts/verify_team.py) | **Read-only.** Checks the repo, AAP and ServiceNow for one team, including a comparison of the route row's `event_stream_uuid` against the real AAP stream UUID, and of the activation's pinned `rulebook_hash` against the rulebook at the project's synced revision. **Record-type aware:** it reads the team's rulebook to see which record types that team handles, then checks each one's playbook, job template, prompt-on-launch and credential. A type the rulebook does not mention is reported `SKIP`, not `FAIL` — Team C has no SCTASK handler on purpose. **The check total is deliberately not a fixed number** (Team A scores 44, Team C 38 + 1 skipped), because it scales with the record types configured. Exits non-zero on any failure; `--json` for CI |
 | [`provision_team.py`](scripts/provision_team.py) | Creates all 16 objects for a new team. **Dry run by default** — `--apply` is required to write. Idempotent, records a manifest, and `--destroy` removes exactly what it made |
 
 **Adding a team is documented both ways — but build your first one by hand.** Work through
@@ -107,10 +114,9 @@ ServiceNow action and flow, plus one route-table row per team.**
 
 ## 1. What this does
 
-A ServiceNow incident is created. A Flow Designer flow posts the incident's details to an
-AAP **event stream**. An EDA **rulebook activation** is listening, matches a rule, and
-launches a controller **job template**. The playbook does remediation work and writes back
-to the incident.
+A ServiceNow record is created. A Flow Designer flow posts its details to an AAP **event
+stream**. An EDA **rulebook activation** is listening, matches a rule, and launches a controller
+**job template**. The playbook does remediation work and writes back to the record.
 
 ```
 ServiceNow incident created
@@ -124,7 +130,7 @@ AAP Event Stream  (authenticates the request)
         │
         ▼
 Rulebook Activation  (ansible-rulebook running in a Decision Environment pod)
-        │  rule condition matches: event.payload.event_type == "incident_created"
+        │  rule condition matches: event.payload.event_type == "servicenow.incident.created"
         ▼
 run_job_template  ──►  Automation Execution job template
                             │
@@ -132,6 +138,44 @@ run_job_template  ──►  Automation Execution job template
                        servicenow_incident_handler.yml
                             └─► updates / closes the incident in ServiceNow
 ```
+
+### One pipeline, three record types
+
+The diagram above is the incident path. SCTASK and Problem are the **same pipeline** — the only
+things that differ are the flow, the action, the rule and the playbook. Everything expensive is
+shared:
+
+| | Shared across record types | New per record type |
+|---|---|---|
+| Event stream, credential, activation | ✅ one per **team** | |
+| `EDA Team Route` row | ✅ one per **team** | |
+| Rulebook file | ✅ one per team | **+1 rule** in it |
+| ServiceNow flow | | **new** |
+| ServiceNow action | | **new** (copy the previous one) |
+| AAP job template | | **new**, per team |
+| Playbook | | **new** |
+
+So a team's stream, token, activation and route row are set up **once** and then serve every
+record type. That is the same property that makes adding a *team* cheap.
+
+> ⚠️ **The activation and ruleset names say "incidents" but handle all three.** Activations are
+> named `<team>-incidents` and were built before SCTASK and Problem existed. The *ruleset* names
+> inside the rulebooks were renamed to `Team X - ServiceNow event automation` because
+> `ansible_eda.ruleset` is reported on every launched job and a stale name there actively misleads
+> you while debugging. The **activation** names were left alone — renaming one is cosmetic and
+> costs nothing, but nothing reads it programmatically either. Rename them to `<team>-events` if the
+> inconsistency bothers you; just know it buys no functional change.
+
+Three things that are **not** per-record-type, and are worth knowing before you assume otherwise:
+
+- **Routing does not change.** An SCTASK assigned to `Team-A` resolves through the same route row
+  as a Team-A incident — same stream, same alias, same UUID.
+- **The playbook is one file per record type, not per team.** Every team runs the same
+  `servicenow_*_handler.yml`; the per-team part is the rulebook and the job template.
+- **Not every record type can be closed by automation.** Incidents and SCTASKs can. Problems
+  cannot — `problem.state` is read-only to the Table API, so Problem automation writes its findings
+  and a human performs the transition. See
+  [§8.1 of the record-type guide](docs/adding-record-types.md#81-what-problem-automation-can-and-cannot-do).
 
 ---
 
@@ -182,23 +226,38 @@ setup.
 
 ```
 .
-├── rulebooks/
-│   └── my_eda_rulebook.yml          # the EDA rulebook (source + rules + action)
+├── rulebooks/                       # ONE PER TEAM, each with one rule per record type
+│   ├── team_a_rulebook.yml          #   incident + sctask + problem
+│   ├── team_b_rulebook.yml          #   incident + sctask + problem
+│   ├── team_c_rulebook.yml          #   incident + problem (no SCTASK template — deliberate)
+│   ├── my_eda_rulebook.yml          # teaching example only. Attached to NOTHING and cannot
+│   │                                #   fire — legacy event_type. See "The rulebook explained"
+│   └── catchall_debug_rulebook.yml  # matches every event on purpose, for fan-out tests.
+│                                    #   MUST stay attached to no activation
 ├── collections/
 │   └── requirements.yml             # servicenow.itsm — installed at project sync
-├── servicenow_incident_handler.yml  # the playbook the job template runs
+├── servicenow_incident_handler.yml  # one playbook per RECORD TYPE, shared by every team.
+├── servicenow_sctask_handler.yml    #   The per-team file is the rulebook, not the playbook.
+├── servicenow_problem_handler.yml   #   Problem writes findings only — it cannot change state
 ├── my_action_playbook.yml           # minimal debug playbook, useful for smoke tests
 ├── scripts/
-│   ├── verify_team.py               # read-only: 29 checks on one team's wiring
+│   ├── verify_team.py               # read-only; record-type aware. Check total varies by team
 │   └── provision_team.py            # builds a team's 16 objects; dry run by default
 ├── docs/
 │   ├── servicenow-dynamic-team-routing.md   # routing design + §9 add-a-team runbook
+│   ├── adding-record-types.md               # add SCTASK and Problem to existing teams
+│   ├── git-workflow.md                      # the squash-merge trap — read before your 2nd PR
 │   ├── phase2b-two-org-runbook.md
 │   ├── scripts/                     # canonical copies of the ServiceNow step scripts
 │   └── images/
 ├── aap-eda-project-sync-fix.md      # troubleshooting: EDA project stuck "Pending"
 └── README.md
 ```
+
+> ⚠️ **Two rulebooks in there are inert on purpose** and must stay that way: `my_eda_rulebook.yml`
+> (the teaching example — its condition tests a legacy `event_type` so it cannot match) and
+> `catchall_debug_rulebook.yml` (matches *everything*, so attaching it to an activation that shares
+> a stream would double-launch every job). Neither is wired to an activation. Leave both alone.
 
 ### Where rulebooks must live — this is a hard requirement
 
@@ -213,6 +272,21 @@ exists, the project sync still reports `completed`, but with
 failure.
 
 ### The rulebook explained
+
+> 🔴 **This is the teaching example (`my_eda_rulebook.yml`), and it will NOT fire as written.**
+> Three things in it are deliberately historical:
+>
+> | In the example | Reality now |
+> |---|---|
+> | `event_type == "incident_created"` | The flows emit **`servicenow.incident.created`**. See [Part 4's migration section](#migration-flat-incident_created--hierarchical-servicenowincidentcreated) |
+> | `name: "ServiceNow Incident Handler"` | No such job template. They are `Team A/B/C Incident Handler` |
+> | `organization: "Default"` | Teams live in organizations `Team A`, `Team B`, `Team C` |
+>
+> It is kept because it is the **smallest readable rulebook** and the field-by-field walkthrough
+> below is what makes the structure click. The file is attached to no activation on purpose, so it
+> cannot do harm. **Do not copy it as a starting point** — copy `rulebooks/team_a_rulebook.yml`,
+> which is the real, working, three-rule shape (one rule per record type) and already carries the
+> `| default('')` hardening and the `eda_event_stream_name` tenant check.
 
 ```yaml
 - name: ServiceNow Incident Automation - Simple Test
@@ -1741,6 +1815,16 @@ curl -sk -X POST -w '\nHTTP:%{http_code}\n' \
   -d '{"event_type":"incident_created","incident_number":"CURLTEST","short_description":"test","priority":"3","cmdb_ci":"host01","state":"New","assigned_to":"admin","category":"Inquiry","sys_id":"0000test"}'
 ```
 
+> ⚠️ **`incident_created` in that payload is deliberate, and deliberately wrong.** The live rulebooks
+> condition on `servicenow.incident.created`, so this payload is accepted by the stream and then
+> matches **no rule**. That is the point: it proves the **token and URL** without launching a job
+> against a fake `sys_id`.
+>
+> So expect `200` **and** no job, and no counter movement in `Last rule fired`. That is a pass, not a
+> half-failure. If you want the full chain to fire, change `event_type` to
+> `servicenow.incident.created` — and use a **real** incident `sys_id`, because the playbook will
+> then try to write back to it.
+
 > 🔑 **Reference the token, don't paste it.** The header is in double quotes so the shell expands the
 > variable — from [2.9's Keychain export](#on-macos-store-it-in-the-keychain), or any
 > `TOKEN=$(...)` of your own. Typing the literal hex here puts a live credential in your shell
@@ -1763,8 +1847,9 @@ then fails at launch with `StrictUndefined`.
 
 ### 5.2 Test the job template on its own
 
-**Automation Execution → Templates → ServiceNow Incident Handler → Launch**, and supply
-extra vars manually:
+**Automation Execution → Templates → `Team <X> Incident Handler` → Launch**, and supply extra vars
+manually. (There is no template called plain `ServiceNow Incident Handler` — templates are per team
+and per record type: `Team A Incident Handler`, `Team A SCTASK Handler`, `Team A Problem Handler`.)
 
 ```yaml
 incident_number: SMOKETEST0001
