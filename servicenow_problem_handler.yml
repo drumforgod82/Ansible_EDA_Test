@@ -21,19 +21,44 @@
 # API answers on that base URI. Calling the module would 404 inside the collection with an error that
 # reads like a credential or network fault rather than a missing application.
 #
-# So the resolve below is a Table API PATCH, and it does not assume it succeeded: it reads the record
-# back and reports what the instance actually did. That read-back earned its keep immediately --
-# PRB0040003 (job 80) and PRB0040006 (job 81) both returned HTTP 200 and stayed at New (101), and
-# without it both jobs would have reported a clean success having changed nothing.
+# WHY THIS PLAY DOES NOT CHANGE THE PROBLEM STATE AT ALL
+# ------------------------------------------------------
+# It cannot, and neither can any other Table API caller. Diagnosed 2026-10-02 after three failed
+# attempts, so that nobody spends that time again:
 #
-# Those two runs are why the resolve is now a WALK rather than a single PATCH: one rung at a time,
-# 101 -> 102 -> 103 -> 104 -> 106, because the jump straight to 106 is silently dropped. See the
-# `problem_state_ladder` var for the measurements.
+#   sys_dictionary_override  problem.state            read_only = TRUE
+#   sys_dictionary           problem.resolution_code  read_only = TRUE
+#   sys_dictionary           problem.resolved_at      read_only = TRUE
+#   sys_dictionary           problem.resolved_by      read_only = TRUE
+#   sys_dictionary           task.state  (parent)     read_only = false
 #
-# If the walk ALSO fails -- every rung returns 200 and the state still does not move -- then the
-# state model refuses Table API transitions outright and the only remaining route is to install the
-# Store application above and swap the walk for servicenow.itsm.problem. The report task says
-# exactly that, in those words, so the job output distinguishes the two outcomes without a re-read.
+# The Table API silently DISCARDS dictionary-read-only fields. No 400, no 403, no sys_audit row --
+# just HTTP 200 and nothing changed. Because `state` never changes, the before-update business rule
+# `Problem Model: Check State Transition` never even fires, so this is not the state model rejecting
+# anything; the write is dropped a layer earlier.
+#
+# What was tried, and what it cost:
+#   1. Single PATCH 101 -> 106       PRB0040003 job 80, PRB0040006 job 81.  HTTP 200, state unmoved.
+#   2. One rung at a time 102..106   PRB0040007 job 85.  All four rungs HTTP 200, state unmoved.
+#      The ladder itself was right -- sttrm_state_transition confirms the model's path really is
+#      New > Assess > Root Cause Analysis > Fix in Progress > Resolved > Closed -- but the shape of
+#      the request was never the problem.
+#   3. servicenow.itsm.problem       Needs the Store app, which is installed on NEITHER this PDI nor
+#      Centene. Not a transferable route; do not re-propose it.
+#
+# THE ASYMMETRY WORTH REMEMBERING: read-only is a UI/API-layer control, not a database one. A
+# SERVER-SIDE GlideRecord update -- a UI Action, a Flow Designer "Update Record" step, a Business
+# Rule, a Scripted REST resource -- is NOT blocked by it, AND still runs the state model. That is why
+# the Resolve button works (it is client script doing g_form.setValue + g_form.save) and why a flow
+# could do this if it ever needs doing. Writing `problem_state` would also reach the database but
+# would bypass the state model and leave resolution_code/resolved_at/resolved_by empty, producing a
+# record in Resolved with no resolution -- worse than leaving it alone.
+#
+# DECISION (James, 2026-10-02): automation writes its findings; a human performs the state change.
+# So this play writes cause_notes, fix_notes and close_notes -- which DO accept Table API writes --
+# and deliberately sends no state and no resolution_code. The job is then honestly green when it has
+# done everything it was asked to do, instead of reporting success for a transition that silently
+# never happened.
 - name: ServiceNow Problem Remediation
   hosts: localhost
   connection: local
@@ -44,46 +69,21 @@
     # is run by more than one organization.
     sn_instance: "{{ SN_HOST }}"
 
-    # Resolving is OFF by default, deliberately -- the same reasoning as the other two playbooks.
-    # The rulebook passes `sn_resolve_problem: true`; a manual launch does not, so the skip path is
-    # testable without touching a real record.
+    # Gate on writing the automation findings. OFF by default so a manual launch cannot touch a real
+    # record; the rulebook passes `sn_resolve_problem: true`.
+    #
+    # THE NAME IS NOW SLIGHTLY WRONG AND IS KEPT ON PURPOSE. This play no longer resolves anything
+    # (see the header) -- the variable gates whether the cause/fix/close notes are written. Renaming
+    # it means editing all three rulebooks, which invalidates their source-mapping hashes and costs a
+    # sync + re-attach + restart on every team. Batch the rename with the next rulebook change
+    # instead of paying that cycle for a cosmetic fix.
     sn_resolve_problem: false
 
-    # Problem state choices read off this instance 2026-10-01 (sys_choice, name=problem^element=state):
+    # Problem state choices on this instance, for reference only -- NOTHING here writes `state`:
     #   101 New   102 Assess   103 Root Cause Analysis   104 Fix in Progress   106 Resolved   107 Closed
-    # There is no active Cancelled choice here, unlike incident. Sent as the integer value, not the
-    # display name -- the Table API wants the value.
-    problem_state_resolved: 106
-    problem_state_closed: 107
-
-    # The ladder, in ascending order, used to walk the record up one rung at a time.
-    #
-    # WHY A WALK AND NOT A SINGLE PATCH
-    # Measured on this instance 2026-10-02, twice (PRB0040003 job 80, PRB0040006 job 81): a PATCH
-    # straight from 101 to 106 returns HTTP 200 and leaves `state` untouched. It is not a permission
-    # fault and nothing is logged -- the state model simply drops the field. Worse, the SAME PATCH
-    # applies partially: cause_notes and fix_notes were written while state and resolution_code were
-    # silently discarded. So a 200 proves nothing here, which is why the read-back below exists.
-    #
-    # 105 DOES NOT EXIST on this instance -- the sequence jumps 104 -> 106. Do not "fill in" the gap;
-    # sending 105 would be an invalid choice.
-    problem_state_ladder:
-      - 101
-      - 102
-      - 103
-      - 104
-      - 106
-      - 107
-
-    # Resolved is the target rather than Closed: it is the natural end state for automated
-    # remediation and leaves the human close to problem management. Override to
-    # `problem_state_closed` if you want the full close.
-    problem_state_target: "{{ problem_state_resolved }}"
-
-    # resolution_code choices on this instance: fix_applied, risk_accepted, canceled, duplicate.
-    # fix_applied is the only one that describes automation having done something, and it is the
-    # code that requires both cause_notes and fix_notes.
-    problem_resolution_code: fix_applied
+    # 105 does not exist -- the sequence jumps 104 -> 106. No active Cancelled, unlike incident.
+    # The report below reads the state back and names it; it does not assert a particular value,
+    # because a problem can legitimately be in any state when automation runs.
 
     # Defaults so a MANUAL launch does not fail on an undefined variable. Extra vars from the
     # rulebook override every one of these, so this costs nothing at run time and makes the job
@@ -206,58 +206,14 @@
             (HTTP {{ servicenow_update.status }}).
           {%- endif %}
 
-    # The walk has to know which rung it is starting from, so read the state before touching it.
-    # This also means a record that is already Resolved is left alone instead of being re-walked.
-    - name: Read the problem state before resolving
-      ansible.builtin.uri:
-        url: "{{ sn_instance }}/api/now/table/problem/{{ sys_id }}?sysparm_fields=number,state&sysparm_display_value=false"
-        method: GET
-        user: "{{ SN_USERNAME }}"
-        password: "{{ SN_PASSWORD }}"
-        force_basic_auth: true
-        validate_certs: false
-        status_code:
-          - 200
-      failed_when: false
-      when:
-        - sn_resolve_problem | bool
-        - sys_id is defined
-        - sys_id | length > 0
-        # Do not try to resolve a record the work-note PATCH just proved does not exist.
-        - servicenow_update.status | default(0) == 200
-      register: problem_state_before
-
-    # Only the rungs ABOVE the current state and up to the target. An already-resolved record yields
-    # an empty list, which skips the walk entirely rather than re-sending transitions.
-    - name: Work out which rungs of the state ladder to climb
-      ansible.builtin.set_fact:
-        problem_state_path: >-
-          {{ problem_state_ladder
-             | select('gt', problem_state_before.json.result.state | int)
-             | select('le', problem_state_target | int)
-             | list }}
-      when:
-        - problem_state_before is not skipped
-        - problem_state_before.status | default(0) == 200
-
-    # One PATCH per rung, because a multi-rung jump is silently dropped (see problem_state_ladder).
-    # resolution_code and the notes ride on the FINAL rung only -- an intermediate state has no
-    # resolution, and fix_applied requires both cause_notes and fix_notes, so they must land together.
+    # Write the findings, and ONLY the findings. No `state`, no `resolution_code` -- see the header
+    # for the dictionary-read-only evidence and the decision that a human performs the transition.
     #
-    # failed_when: false because the state model -- not the credential, not the network -- is the
-    # thing most likely to refuse this, and a hard failure here would hide the read-back below that
-    # tells us which it was. The loop deliberately does NOT stop on the first refusal: the per-rung
-    # statuses in problem_walk.results are what name the exact rung that broke.
-    - name: Walk the problem up the state ladder one rung at a time
-      vars:
-        resolution_payload:
-          resolution_code: "{{ problem_resolution_code }}"
-          cause_notes: >-
-            Root cause collection run by Ansible Automation. Investigation path: {{ investigation_type }}.
-          fix_notes: >-
-            Resolved by Ansible Automation at {{ lookup('pipe', 'TZ=America/Chicago date "+%Y-%m-%d %H:%M:%S %Z"') }}.
-          close_notes: >-
-            Resolved by Ansible Automation. Investigation path: {{ investigation_type }}.
+    # Unlike every earlier version of this task, this one is allowed to FAIL the job: these three
+    # fields do accept Table API writes, so a non-200 here is a real fault (credential, network, or
+    # the record vanishing mid-run) rather than the platform declining a transition. That is the
+    # difference between an honest green job and the three green jobs that changed nothing.
+    - name: Write the automation findings to the problem
       ansible.builtin.uri:
         url: "{{ sn_instance }}/api/now/table/problem/{{ sys_id }}"
         method: PATCH
@@ -267,24 +223,31 @@
         password: "{{ SN_PASSWORD }}"
         force_basic_auth: true
         body_format: json
-        body: >-
-          {{ {'state': item}
-             | combine(resolution_payload if item | int == problem_state_target | int else {}) }}
+        body:
+          cause_notes: >-
+            Root cause collection run by Ansible Automation. Investigation path: {{ investigation_type }}.
+          fix_notes: >-
+            Automated remediation completed at
+            {{ lookup('pipe', 'TZ=America/Chicago date "+%Y-%m-%d %H:%M:%S %Z"') }}.
+            State left unchanged for problem management to action.
+          close_notes: >-
+            Investigated by Ansible Automation. Investigation path: {{ investigation_type }}.
         validate_certs: false
         status_code:
           - 200
-      failed_when: false
-      loop: "{{ problem_state_path | default([]) }}"
-      loop_control:
-        label: "{{ item }}"
-      when: problem_state_path | default([]) | length > 0
-      register: problem_walk
+      when:
+        - sn_resolve_problem | bool
+        - sys_id is defined
+        - sys_id | length > 0
+        # Do not write to a record the work-note PATCH just proved does not exist.
+        - servicenow_update.status | default(0) == 200
+      register: problem_findings
 
     # The PATCH returning 200 is not proof the state moved -- a state model can accept the write and
     # leave `state` untouched. Read it back rather than trusting the status code.
-    - name: Read the problem back to confirm the state actually moved
+    - name: Read the problem back to confirm what the instance stored
       ansible.builtin.uri:
-        url: "{{ sn_instance }}/api/now/table/problem/{{ sys_id }}?sysparm_fields=number,state,resolution_code&sysparm_display_value=all"
+        url: "{{ sn_instance }}/api/now/table/problem/{{ sys_id }}?sysparm_fields=number,state,cause_notes,fix_notes&sysparm_display_value=all"
         method: GET
         user: "{{ SN_USERNAME }}"
         password: "{{ SN_PASSWORD }}"
@@ -292,66 +255,53 @@
         validate_certs: false
         status_code:
           - 200
-      when: problem_walk is not skipped
+      when: problem_findings is not skipped
       register: problem_readback
 
-    - name: Report the resolve outcome
+    # The read-back is kept even though the PATCH can now fail the job, because a 200 that writes
+    # nothing is exactly the failure this play already hit three times. Verify, do not assume.
+    - name: Report what was written and what was deliberately left alone
       ansible.builtin.debug:
         msg: >-
-          {% set observed = problem_readback.json.result.state.value | default('') | string -%}
-          {% set refused = problem_walk.results | default([]) | rejectattr('status', 'equalto', 200) | list -%}
-          {% if refused | length > 0 -%}
-            Problem {{ problem_number | default('(unknown)') }} stalled on the state ladder. Rung(s)
-            {{ refused | map(attribute='item') | list | join(', ') }} were refused with HTTP
-            {{ refused | map(attribute='status') | list | join(', ') }}; it is now at
-            {{ problem_readback.json.result.state.display_value | default(observed) }} ({{ observed }}).
-            A 400 or 403 on a single rung means that one transition needs a field this play does not
-            send -- read the response body for the field name.
-          {%- elif observed == problem_state_target | string -%}
-            Problem {{ problem_number | default('(unknown)') }} reached state
-            {{ problem_readback.json.result.state.display_value | default(observed) }}
-            ({{ observed }}) with resolution code
-            {{ problem_readback.json.result.resolution_code.display_value | default('(none)') }}
-            after walking {{ problem_state_path | join(' -> ') }}.
+          {% set notes_landed = problem_readback.json.result.cause_notes.display_value | default('') | length > 0 -%}
+          {% if notes_landed -%}
+            Problem {{ problem_number | default('(unknown)') }}: findings written (cause_notes and
+            fix_notes populated). State left at
+            {{ problem_readback.json.result.state.display_value | default('unknown') }} BY DESIGN --
+            problem.state is read-only to the Table API, and the transition is problem management's
+            to make. This is a complete, successful run.
           {%- else -%}
-            Problem {{ problem_number | default('(unknown)') }} is still at
-            {{ problem_readback.json.result.state.display_value | default(observed) }} ({{ observed }}),
-            not the requested {{ problem_state_target }} -- and EVERY rung of
-            {{ problem_state_path | join(' -> ') }} returned HTTP 200. So the state model ignores
-            Table API transitions even one rung at a time, and the walk is not the answer: install
-            the ServiceNow Store application "API for Red Hat Ansible Automation Platform Certified
-            Content Collection" and switch this task to servicenow.itsm.problem.
+            Problem {{ problem_number | default('(unknown)') }}: the PATCH returned
+            HTTP {{ problem_findings.status | default('n/a') }} but cause_notes read back EMPTY.
+            That means a field this play writes has become read-only too -- re-check
+            sys_dictionary and sys_dictionary_override for the problem table before assuming a
+            credential or network fault.
           {%- endif %}
-      when: problem_walk is not skipped
+      when: problem_findings is not skipped
 
-    # Says WHICH gate stopped the resolve. Without this a skipped resolve is invisible in the job
-    # output and looks identical to a resolve that silently did nothing.
-    - name: Report that the problem resolve was skipped
+    # Says WHICH gate stopped the write. Without this a skip is invisible in the job output and looks
+    # identical to a write that silently did nothing.
+    - name: Report that the findings write was skipped
       ansible.builtin.debug:
         msg: >-
-          Problem {{ problem_number | default('(unknown)') }} was NOT resolved --
+          Problem {{ problem_number | default('(unknown)') }}: no findings were written --
           {% if not (sn_resolve_problem | bool) -%}
-            sn_resolve_problem is false. Pass -e sn_resolve_problem=true to resolve it.
+            sn_resolve_problem is false. Pass -e sn_resolve_problem=true to write them.
           {%- elif not (sys_id is defined and sys_id | length > 0) -%}
             no sys_id was supplied.
-          {%- elif servicenow_update.status | default(0) != 200 -%}
+          {%- else -%}
             sys_id {{ sys_id }} was not found in {{ sn_instance }} (the work-note PATCH returned
             {{ servicenow_update.status | default('n/a') }}).
-          {%- else -%}
-            it is already at or beyond the target state
-            ({{ problem_state_before.json.result.state | default('unknown') }} vs target
-            {{ problem_state_target }}), so there was no rung left to climb. This is a no-op, not a
-            failure.
           {%- endif %}
-      when: problem_walk is skipped
+      when: problem_findings is skipped
 
-    - name: Print problem closure information
+    - name: Print problem summary
       ansible.builtin.debug:
         msg:
-          - "========= Problem Closure Information ========="
+          - "============ Problem Summary ============"
           - "Problem Number: {{ problem_number }}"
-          - "Requested State: {{ problem_state_target }}"
-          - "State Ladder Walked: {{ problem_state_path | default([]) | join(' -> ') | default('(none)', true) }}"
-          - "Observed State: {{ problem_readback.json.result.state.display_value | default('(not read back)') }}"
+          - "Investigation Path: {{ investigation_type }}"
+          - "Findings Written: cause_notes, fix_notes, close_notes"
+          - "State: {{ problem_readback.json.result.state.display_value | default('(not read back)') }} (not changed by automation, by design)"
           - "Problem URL: {{ sn_instance }}/problem.do?sys_id={{ sys_id }}"
-      when: problem_walk is not skipped
+      when: problem_findings is not skipped
