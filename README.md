@@ -46,7 +46,10 @@ This README covers the AAP and ServiceNow object setup. These go further:
 | [Git workflow](docs/git-workflow.md) | **Read before your second PR.** Squash-merge to a protected `main` plus a no-force ruleset on `dev` makes `dev` diverge on every PR, and a tree comparison does not predict it. The one-line habit that prevents it, three ways to remove the cause, and what to sync after a merge — playbook changes need no re-attach, rulebook changes need the full cycle. |
 
 Scripts pasted into ServiceNow live in [`docs/scripts/`](docs/scripts/) and are the canonical
-copies. Paste from those files rather than from a rendered page.
+copies — all six action step scripts, pulled from the live instance and indexed with their step
+sys_ids and declared variable names in [`docs/scripts/README.md`](docs/scripts/README.md). Paste
+from those files rather than from a rendered page: copying JavaScript out of rendered markdown is
+how curly quotes and mangled whitespace get into a script.
 
 ### Tooling in `scripts/`
 
@@ -1437,7 +1440,7 @@ The `Authorization` header comes from the alias — do not add it by hand.
 
 #### Step 3 — Script step: "Process Response"
 
-**Canonical script: [`docs/scripts/step3_process_response.js`](docs/scripts/step3_process_response.js).**
+**Canonical script: [`docs/scripts/incident_step3_process_response.js`](docs/scripts/incident_step3_process_response.js)** — see [`docs/scripts/`](docs/scripts/) for all six, and for the SCTASK and Problem variants of this step.
 Paste from that file, not from a rendered page — copying out of Markdown can convert straight
 quotes to curly ones, which leaves an unterminated string and reports as `')' expected`.
 

@@ -704,7 +704,7 @@ Declare **two** input variables on this step, with these exact names:
 
 ### 6.2 Step 3 — normalise the response
 
-> **Paste from the file, not from here:** `docs/scripts/step3_process_response.js`.
+> **Paste from the file, not from here:** [`docs/scripts/incident_step3_process_response.js`](scripts/incident_step3_process_response.js). All six step scripts are indexed in [`docs/scripts/README.md`](scripts/README.md).
 > It is the canonical copy, pure ASCII, and verified with `node --check`. Copying out of a
 > rendered document can convert straight quotes to curly ones, which breaks the script
 > silently. This block is a mirror of that file - if they ever disagree, the file wins.
