@@ -1245,9 +1245,10 @@ log table never change.
 
 | Finding | Consequence |
 |---|---|
-| All 26 existing decision tables use `answer_type: reference` with an `answer_table` | A decision table can return **a record**, so it can hand you back an `EDA Team Route` row directly |
+| All **27** decision tables on the instance use `answer_type: reference` with an `answer_table` (17 of them actually populated; re-counted 2026-10-05) | A decision table can return **a record**, so it can hand you back an `EDA Team Route` row directly |
 | **No out-of-box Flow Designer action for decision tables exists in this instance** (searched `sys_hub_action_type_base` for anything named/interned "decision" — zero rows) | A flow cannot call a decision table by drag-and-drop here. It needs a script step. |
-| The scriptable API is `sn_dt.DecisionTableAPI` (confirmed — `global.DecisionTableUtils` calls it internally) | That is the namespace to use, but see the caveat below |
+| The scriptable API is **`sn_dt.CachedDecisionTableAPI`**, and `executeDecisions(dt, input)` is the method that returns answers — **verified by execution from scope 2026-10-05**, not inferred | That is what §3d calls. Every `sn_decision_table.*` Script Include is `package_private` and unusable from a scoped app |
+| Calling it creates a `sys_scope_privilege` row **per method**, not per class | `isEmptyDecisionTable` and `executeDecisions` are two separate grants. A background script auto-grants; a flow running in the background **fails** instead. Pre-grant both — see §3d |
 | `api_user` holds `decision_table_admin` | You can read and build them |
 
 That second row is the important one: a Decision Table **costs you a script step**, which is
@@ -1407,20 +1408,72 @@ a function's return values.
 > **inputs** (facts in) → **answer elements** (values out) → **decisions** (rows mapping one to the
 > other).
 
+> **This app already contains one**, named `Event-Driven Ansible decision table`, created
+> 2026-09-28 and left untouched (`sys_mod_count = 0`, no inputs, no elements, no decisions). Finish
+> that record rather than making a second one. Its `answer_type = reference` and
+> `answer_table = sys_decision_multi_result` are already the right defaults — nothing to undo.
+
+> **Verifying your work by query: the child tables link on `model_id`, not `parent`.** Inputs and
+> answer elements are *variable-model* records, the same family as a Flow Designer step's declared
+> variables. `parent` exists as a column and silently returns **0 rows** even for a published,
+> populated table — confirmed against stock `Deployment Migration to ReleaseOps`.
+>
+> | Part | Table | Filter |
+> |---|---|---|
+> | Inputs | `sys_decision_input` | `model_id=<decision table sys_id>` |
+> | Answer elements | `sys_decision_multi_result_element` | `model_id=<decision table sys_id>` |
+> | Decisions | `sys_decision_question` | `decision_table=<decision table sys_id>` |
+>
+> Build them in **Decision Builder**, not over the Table API — they carry generated `name` values
+> (`var__m_sys_decision_input_<model_id>`) and an `element_mapping_provider` attribute that
+> hand-created records will not reproduce correctly.
+
 > **`status: draft` and `active: false` mean it will not evaluate.** There is a publish step.
 > An unpublished table returning nothing looks exactly like a table whose conditions do not match —
 > check `status` first when debugging.
 
 #### 3b. Add inputs
 
-Inputs are the facts the table reasons about. Add one:
+Inputs are the facts the table reasons about. Add three:
 
-| Label | Type | Reference |
-|---|---|---|
-| `Incident` | Reference | `incident` |
+| Label | Type | Reference | Mandatory |
+|---|---|---|---|
+| `Assignment group` | Reference | `sys_user_group` | yes |
+| `Record type` | Choice | `incident` / `sctask` / `problem` | no |
+| `Priority` | Choice | — | no |
 
-You can dot-walk from a reference input in conditions (`Incident → Priority`), so one input is
-usually enough. Add scalar inputs only when a value is not reachable from the record.
+**Reference `sys_user_group`, not `incident`.** This is the decision that makes one table serve all
+three record types. All of `incident`, `sc_task` and `problem` carry an `assignment_group` pointing
+at `sys_user_group`, so a single input accepts a group from any of them. A Reference input typed to
+`incident` accepts only incidents, and you would need three decision tables.
+
+Typing it as a **Reference** rather than a String also matters: the condition builder then displays
+group **names** while storing the sys_id, and that stored sys_id matches `EDA Team Route`, whose own
+`assignment_group` column is a reference holding sys_ids. A String input leaves you comparing raw
+sys_ids like `77b8a622c3ef4bd0b08b9b377d0131fe` in the builder — correct, and unreadable in six
+months.
+
+`Record type` is not used by any rule in the table below. Add it now anyway, non-mandatory: it costs
+nothing, and it means branching by record type later is a new row rather than a restructure.
+
+> **Why not a Reference to the record, and dot-walk?** Because dot-walking is what ties a table to
+> one record type. The trade you are making is real: a new routing fact (say `Category`) now needs a
+> new **input** *and* a change to the calling script to pass it, instead of just a new condition.
+> That is the cost of one table instead of three.
+>
+> The evidence for this split is on your own instance. Of 17 populated decision tables:
+> **Reference-to-the-record ⇒ one table per type** — `Contract Approval Flow Handler`
+> (→`ast_contract`), `Transfer Order Flow Handler`, `Transfer Order Line Flow Handler`. ServiceNow
+> built three rather than one generic table, because their logic genuinely differs per type.
+> **Scalar / lookup-reference inputs ⇒ one table called from code** — `Deployment Migration to
+> ReleaseOps` (nine scalar inputs, and the only `published` table on the instance),
+> `Callback Topic Policy`, `Deployment Environment Type Flow` (a `choice` input). A few are
+> **mixed** — record reference plus scalars for facts not reachable by dot-walk
+> (`Normal Change Policy`, `SRM: Service management approval policy`).
+>
+> The deciding question is **not how many record types you have** — it is whether the routing logic
+> differs between them. Here it does not: all three route by assignment group to the same three
+> teams. So: one table.
 
 > Name inputs explicitly. Several stock tables on your instance have auto-generated element names
 > like `global_4060c5fe7f330210674d91fadc86650a`, which are unreadable six months later.
@@ -1450,10 +1503,16 @@ Each decision is **condition → answer**. They evaluate in `order`, and **the f
 
 | Order | Label | Condition | Answer |
 |---|---|---|---|
-| 100 | P1 database → Team B | `Incident → Priority` is `1` AND `Incident → Category` is `database` | the `team-b` route row |
-| 200 | Group Team-A | `Incident → Assignment group` is `Team-A` | the `team-a` route row |
-| 300 | Group Team-B | `Incident → Assignment group` is `Team-B` | the `team-b` route row |
+| 100 | P1 → Team B | `Priority` is `1` AND `Assignment group` is `Team-A` | the `team-b` route row |
+| 200 | Group Team-A | `Assignment group` is `Team-A` | the `team-a` route row |
+| 300 | Group Team-B | `Assignment group` is `Team-B` | the `team-b` route row |
+| 400 | Group Team-C | `Assignment group` is `Team-C` | the `team-c` route row |
 | 999 | Default — no routing | *(leave empty)* | *(leave empty)* |
+
+Conditions read off the inputs directly (`Assignment group`, `Priority`) rather than dot-walking
+through a record, which is what §3b bought you. Row 100 is an escalation example only — delete it if
+you do not want priority to override the group, and note it must sit **above** row 200 or the plain
+group rule wins and it never fires.
 
 Two conventions worth copying from the tables already on your instance:
 
@@ -1469,6 +1528,10 @@ rule will win and the special case will never fire.
 
 Replace flow step 1 with a script step:
 
+Declare two step inputs, `record_sys_id` and `record_table` (both String), and two outputs,
+`route_sys_id` (String) and `found` (True/False). Letting the script read the record keeps the flow
+wiring identical for all three record types — you pill the record's **Sys ID**, not the record.
+
 ```javascript
 (function execute(inputs, outputs) {
     'use strict';
@@ -1478,24 +1541,52 @@ Replace flow step 1 with a script step:
     outputs.route_sys_id = '';
     outputs.found = false;
 
+    // The decision table's sys_id is configuration, not a literal - §7's no-hardcoded-sys_ids rule.
     var policyId = gs.getProperty('x_661661_james_tes.eda.routing_policy_id', '');
     if (!policyId) {
         gs.error(LOG + 'property x_661661_james_tes.eda.routing_policy_id is not set');
         throw new Error('Routing policy not configured');
     }
 
-    // Verify the method name against sn_dt.DecisionTableAPI on your instance
-    // before trusting this - see the caveat below.
-    var api = new sn_dt.DecisionTableAPI();
-    var result = api.getDecision(policyId, { incident: inputs.incident_record });
+    // Maps the table to the Record type input. Keep these strings in step with the
+    // event_type contract in the three Build EDA Payload scripts - docs/scripts/.
+    var TYPE_BY_TABLE = { incident: 'incident', sc_task: 'sctask', problem: 'problem' };
 
-    if (result && result.answer) {
-        outputs.route_sys_id = String(result.answer);
+    var table = String(inputs.record_table || '');
+    var recordType = TYPE_BY_TABLE[table];
+    if (!recordType) {
+        outputs.error_message = 'Unrouted table: ' + table;
+        gs.error(LOG + outputs.error_message);
+        return;
+    }
+
+    var record = new GlideRecord(table);
+    if (!record.get(String(inputs.record_sys_id || ''))) {
+        gs.error(LOG + 'record not found: ' + table + '/' + inputs.record_sys_id);
+        return;
+    }
+
+    // Input keys MUST match the decision table's input element names exactly.
+    // An unrecognised key is ignored silently, so a typo reads as "no rule matched".
+    var dtInput = {
+        assignment_group: record.getValue('assignment_group') || '',
+        record_type: recordType,
+        priority: record.getValue('priority') || ''
+    };
+
+    // executeDecisions returns the answers keyed by answer-element name.
+    var answers = new sn_dt.CachedDecisionTableAPI().executeDecisions(policyId, dtInput);
+
+    // An empty object is the normal "nothing matched" result - and is also what an
+    // unpublished (status=draft) table returns. Check status before chasing conditions.
+    if (answers && answers.route) {
+        outputs.route_sys_id = String(answers.route);
         outputs.found = true;
         return;
     }
 
-    gs.info(LOG + 'no routing decision matched');
+    gs.info(LOG + 'no routing decision matched for ' + record.getValue('number') +
+        ' (group=' + dtInput.assignment_group + ', type=' + recordType + ')');
 
 })(inputs, outputs);
 ```
@@ -1507,14 +1598,56 @@ Store the decision table's sys_id in the scoped property
 `x_661661_james_tes.eda.routing_policy_id` rather than pasting it into the script — §7's
 "no hardcoded sys_ids" rule.
 
-> **Caveat, stated plainly:** I confirmed the namespace `sn_dt.DecisionTableAPI` exists, because
-> `global.DecisionTableUtils` calls `new sn_dt.DecisionTableAPI().getDecisionTable(...)`
-> internally. I did **not** confirm the *evaluation* method is `getDecision(id, inputs)` or that
-> the result exposes `.answer`. Verify before relying on it: open the Script Include
-> `sn_decision_table.DecisionTableUtil`, or use Decision Builder's built-in **Test** button to
-> evaluate the table against a real incident and inspect the returned shape. ServiceNow's published
-> docs would settle this, but the docs site renders article bodies with JavaScript and returns only
-> its navigation shell to a fetcher, so I could not read them from this machine.
+#### 3e. Cut over without breaking routing
+
+The decision table replaces a `Look Up Record` step that already works for three teams and three
+record types. Do not swap them in one move — an unpublished table or one wrong condition stops
+routing for everything at once, and the symptom (`found = false`) is identical either way.
+
+1. **Publish the table and `active = true`.** Until then it returns `{}` and every lookup "misses".
+2. Add the script step **after** the existing `Look Up Record`, leaving the action's pills where
+   they are. Have it log its answer only. Nothing downstream changes.
+3. Fire one **Incident**, one **SCTASK** and one **Problem**, and compare the logged
+   `route_sys_id` against the route row the `Look Up Record` actually used. All three must agree —
+   this is what catches an input-name typo, which otherwise reads as "no rule matched".
+4. Only then repoint the action's pills at the script step's outputs, and delete the
+   `Look Up Record`.
+
+Keep the `Look Up Record` in a deactivated state for one cycle rather than deleting it immediately,
+so rollback is a toggle rather than a rebuild.
+
+> ✅ **API verified on this instance, 2026-10-05.** Earlier revisions of this page carried a caveat
+> that the evaluation method was unconfirmed. It is now confirmed by execution:
+> `new sn_dt.CachedDecisionTableAPI().executeDecisions(<dt sys_id>, {})` returned `{}` from scope
+> `x_661661_james_tes` against an empty table. The other usable methods on that class are
+> `isEmptyDecisionTable(dt)`, `evaluateDecisionQuestions(dt, input, bool)` and
+> `executeCondition(dt, input, condition)`.
+>
+> **Do not reach for the `sn_decision_table.*` Script Includes** — every one of them is
+> `package_private` and therefore unreachable from a scoped application.
+> `global.AuthPolicyDecisionTableAPI` *is* public and, despite its name, a generic pass-through
+> wrapper — but its own source carries `DEF0517589: changing the Decision table API from
+> getDecisions to evaluateDecisionQuestions`, so ServiceNow has already altered its internals once.
+> Do not build routing on it. (Also note its `executeDecisionTable()` returns a bare **boolean**,
+> not the answer.)
+
+> 🔴 **Pre-grant the cross-scope privilege, or the first flow run fails.** Each call creates a
+> `sys_scope_privilege` row — and for a Java scriptable API the grant is **per method**, not per
+> class. `isEmptyDecisionTable` and `executeDecisions` are two separate grants. The trap: running
+> this from **Scripts - Background** *prompts and auto-grants*, but the same ungranted call inside a
+> Flow Designer action running in the background simply **fails**. So exercise every method you will
+> call from a background script first, then wire the flow:
+>
+> ```javascript
+> var DT = gs.getProperty('x_661661_james_tes.eda.routing_policy_id', '');
+> var dt = new sn_dt.CachedDecisionTableAPI();
+> gs.info('isEmpty: ' + dt.isEmptyDecisionTable(DT));
+> gs.info('execute: ' + JSON.stringify(dt.executeDecisions(DT, {})));
+> ```
+>
+> Audit what the app has accumulated with
+> `sys_scope_privilege?sysparm_query=source_scope=<your scope sys_id>` — these are part of the
+> application and must exist on any instance you promote it to.
 
 ---
 
@@ -1525,7 +1658,7 @@ Store the decision table's sys_id in the scoped property
 | **0. Rulebook rules** | none in ServiceNow | the team, in Git | **the destination team is stable and only the automation differs — this is the right answer almost always** |
 | **1. Wider lookup condition** | none | you, in the flow | the **team** must change based on a handful of incident fields |
 | **2. Conditions column** | one small step | anyone, per table row | many rules, each independently editable |
-| **3. Decision Table** | one step + unverified API | process owners, in Decision Builder | logic is governed, audited, or owned outside the platform team |
+| **3. Decision Table** | one step + a per-method cross-scope grant | process owners, in Decision Builder | logic is governed, audited, or owned outside the platform team — or you want Decision Builder's versioning and test harness |
 
 Whichever you pick, the route table stays keyed on `team_code`, the action is untouched, and adding
 a team is still a row plus its AAP objects (§9).
