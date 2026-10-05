@@ -1,4 +1,3 @@
-\
 # Adding a record type — SCTASK and Problem
 
 **Written for someone who has not done this before.** Every step names the exact menu path. Do the
@@ -21,10 +20,12 @@ keyed on team code, and the team has not changed. **No new route rows, no schema
 | ServiceNow flow | `Trigger EDA remediation on Incident-EDA` | **new** | **new** |
 | ServiceNow action | `Send Incident to Ansible EDA` | **new** | **new** |
 | Enrollment table | — | **new** (catalog-item filter) | not needed |
+| Route gate in the flow | — | covered by the enrollment gate | **required, and easy to miss** — see [§8.6](#86-the-flow-servicenow) |
 | AAP job template | `Team X Incident Handler` | **new** per team | **new** per team |
 | Playbook | `servicenow_incident_handler.yml` | **new** | **new** |
 | Rulebook | existing file | **+1 rule** | **+1 rule** |
 | Event stream / activation | unchanged | unchanged | unchanged |
+| Can automation close the record? | yes | yes | **no** — see [§8.1](#81-what-problem-automation-can-and-cannot-do) |
 
 > 🔴 **Do not edit `Trigger EDA remediation on Incident-EDA` or `Send Incident to Ansible EDA`.**
 > Incidents work. A copy that breaks costs you nothing; an edit that breaks takes production
@@ -35,6 +36,15 @@ assigned to a team — only ones for specific catalog items. That is a second fi
 a ServiceNow table rather than the rulebook: enrolling an item then costs one row instead of a
 rulebook edit plus a project sync plus an activation restart. Problems have no catalog item, so
 assignment group is the only filter and the route table already provides it.
+
+**But that is also why Problem needs its own route gate.** SCTASK's enrollment gate incidentally
+stops an unrouted record reaching the action. Problem has no enrollment gate, so nothing stops it —
+and the flow will happily call the action with an empty connection alias. Build the gate in §8.6.
+
+**And read [§8.1](#81-what-problem-automation-can-and-cannot-do) before you start Problem at all.**
+`problem.state` is read-only to the Table API, so Problem automation writes its findings and a human
+performs the state change. That is a design decision, not a bug, and knowing it up front changes what
+you build.
 
 ---
 
@@ -317,9 +327,14 @@ thing that sets it.
 > edit changes it, and skipping the re-attach fails with *"Rulebook has changed since the sources were
 > mapped."* Even a whitespace-only change invalidates it.
 
-> ✅ **Verify:** `python3 scripts/verify_team.py --team team-a` reports **29/29**, including
-> *"source mapping matches the synced rulebook (not stale)"*. The activation shows **Running** and its
-> log ends with `Waiting for events`.
+> ✅ **Verify:** `python3 scripts/verify_team.py --team team-a` passes with **no FAIL rows**,
+> including *"source mapping matches the synced rulebook (not stale)"*. The activation shows
+> **Running** and its log ends with `Waiting for events`.
+>
+> Read the header line it prints — `Record types in team_a_rulebook.yml: incident + sctask + problem`
+> — and confirm it lists the type you just added. **Do not look for a fixed check total:** the count
+> scales with how many record types the team handles, so it differs per team by design (Team A
+> scores 44, Team C 38 with one `SKIP`).
 
 ---
 
@@ -364,6 +379,41 @@ does, or the later steps have nothing to send:
 `target_team` comes from the **`team_code`** action input — declare that input *and* map its pill, or
 every payload ships `target_team` empty with no error at all.
 
+#### Reading the catalog variables — do not reach for `GlobalWorkflowHelper`
+
+An SCTASK payload usually wants the catalog variables the requester filled in. If you are porting a
+script from another instance it will probably call **`global.GlobalWorkflowHelper`** to get them.
+**That class does not exist here**, and the failure reads like a scope or privilege problem rather
+than a missing class.
+
+Read the variable pool directly off the RITM instead:
+
+```javascript
+// The RITM carries the catalog item, the order guide and the variables.
+var mtom = new GlideRecord('sc_item_option_mtom');
+mtom.addQuery('request_item', ritm.getUniqueValue());
+mtom.query();
+while (mtom.next()) {
+    var varName = mtom.sc_item_option.item_option_new.name.toString();
+    if (varName) {
+        payload[varName] = cleanFieldValue(mtom.sc_item_option.value.toString());
+    }
+}
+```
+
+`sc_item_option_mtom` is the many-to-many between the requested item and its answers;
+`sc_item_option.item_option_new.name` is the variable's **name** and `sc_item_option.value` is the
+answer. Get the RITM from `task.getValue('request_item')`.
+
+> 🔴 **Loop the catalog variables FIRST, then set the reserved keys.** A variable named `event_type`,
+> `sys_id` or `target_team` would otherwise overwrite a routing key and break the rule match — and it
+> would look like a rulebook bug. Setting the reserved keys last makes a collision harmless.
+
+> ⚠️ **Cross-scope privileges.** Reading these from a scoped app needs `sys_scope_privilege` records
+> for `sc_task`, `sc_req_item`, `sc_request`, `sc_item_option` and `task`. They exist in this app
+> already; if you build the action in a *new* scope, expect a runtime failure that reads like a code
+> bug until you add them.
+
 > 🔴 **Step input names are case-sensitive, and declaring a variable is separate from mapping a pill
 > into it.** The incident action declares `Incident_record` (capital I) while its action input is
 > `incident_record`; those are *different variables*. An unmapped input is silently empty at run
@@ -401,6 +451,13 @@ authoritative filter. A narrow trigger that disagrees with the table is two sour
 |---|---|
 | Table | `EDA Enabled Catalog Items` |
 | Conditions | `Catalog item` **is** `Trigger → Catalog Task Record → Item` **AND** `Active` **is** true |
+
+> ⚠️ **The single condition set above is not what was actually built.** If you enrol by order guide as
+> well — and §1.3 explains why you probably should — this becomes **two OR'd condition sets**, each
+> carrying its own `Active is true` *and* its own `is not empty` guard. Go back and read
+> [§1.3](#13-optional--also-enrol-by-order-guide) before you build this step; it is 250 lines earlier
+> and it is the thing a reader working from here will miss. Both branches of that gate are proven:
+> `James Test - VM Snapshot` is **not** individually enrolled, so only the order-guide row catches it.
 
 Then **Add Flow Logic → If**, with the condition:
 
@@ -577,25 +634,298 @@ the two fail-open bugs above.
 
 ---
 
-## Phase 8 — Problem, and the other teams
+## Phase 8 — Problem
 
-**Problem is the same shape minus Phase 1.** Problems have no catalog item, so there is no enrollment
-table and no gate — the route lookup on assignment group is the only filter.
+Built and verified 2026-10-02. **Problem is the same shape as SCTASK minus Phase 1, plus one thing
+SCTASK got for free.** Problems have no catalog item, so there is no enrollment table — but that
+means the route lookup is the *only* filter, and nothing stops the flow when the lookup finds
+nothing. SCTASK's enrollment gate happened to cover that case. Problem needs its own gate, as §8.5
+explains, and skipping it is how the first build failed.
 
-1. `servicenow_problem_handler.yml`, pushed
-2. `Team A Problem Handler` job template
-3. A third rule in the rulebook on `event.payload.event_type == "servicenow.problem.created"` — then
-   sync, **re-attach**, restart again
-4. `Send Problem to Ansible EDA` action, copied, with your Problem script
-5. `Trigger EDA remediation on Problem` flow — trigger on `problem`, route lookup, action, work note
-6. Test, including the isolation check
+Read §8.1 before anything else. It changes what this phase is for.
 
-**For Teams B and C**, repeat Phases 3, 4 and 8.2–8.3 only. The flows, the actions and the enrollment
-table are **shared across all teams** — that is the same property that makes adding a team cheap, and
-it holds for adding a record type too.
+### 8.1 What Problem automation can and cannot do
 
-> ✅ **Final verify:** `verify_team.py` at **29/29** for every team, and one incident, one SCTASK and
-> one problem each landing on their own job template with only their own team's stream counter moving.
+**It cannot change the problem's state, and neither can anything else that uses the Table API.**
+Three separate attempts proved this; the evidence is worth stating once so nobody repeats them:
+
+| Field | Where | `read_only` |
+|---|---|---|
+| `task.state` (the parent table) | `sys_dictionary` | false |
+| **`problem.state`** | **`sys_dictionary_override`** | **true** |
+| `problem.resolution_code` | `sys_dictionary` | **true** |
+| `problem.resolved_at`, `problem.resolved_by` | `sys_dictionary` | **true** |
+
+The Table API **silently discards** dictionary-read-only fields. No 400, no 403, no `sys_audit` row
+— HTTP 200 and nothing changed. And because `state` never changes, the before-update business rule
+`Problem Model: Check State Transition` never even fires, so this is not the state model rejecting a
+transition. The write is dropped a layer earlier than that.
+
+> 🔴 **Do not try to confirm this on the Dictionary Override *form*.** The form has a checkbox
+> labelled **"Override read only option"** which is a *different field* from the `read_only_override`
+> boolean that carries the value — and on this record that checkbox is **unticked** while
+> `read_only_override` and `read_only` are both **true**. Read the form and you will conclude the
+> opposite of the truth.
+>
+> Check the **list view** with the real columns instead:
+> `sys_dictionary_override_list.do?sysparm_query=name=problem`, then add the **Read only** and
+> **Override read only** columns. Or read it over the API, which is unambiguous:
+>
+> ```
+> read_only           true
+> read_only_override  true
+> read_only_option    instance_configured
+> ```
+
+![problem.state is read-only — list view with the Read only and Override read only columns](images/100-sn-problem-state-readonly.png)
+
+What was tried, so you do not retry it:
+
+| Attempt | Result |
+|---|---|
+| Single PATCH, 101 → 106 | HTTP 200, state unmoved |
+| One rung at a time, 102 → 103 → 104 → 106 | All four rungs HTTP 200, state unmoved. The ladder matched the model's real path (`sttrm_state_transition` confirms New → Assess → Root Cause Analysis → Fix in Progress → Resolved → Closed) — the shape of the request was never the problem |
+| `servicenow.itsm.problem` module | Needs the Store app *API for Red Hat Ansible Automation Platform Certified Content Collection*, which is not installed here **or at Centene**. Not a transferable route |
+
+> 🔴 **Do not "fix" this by writing `problem_state`.** That field *is* writable, and the business
+> rule `Copy Problem State to State` (before, order 1000000) would mirror it into `state`. But
+> `Check State Transition` runs at order 100 and inspects `state`, still unchanged at that point — so
+> you bypass the state model entirely. Combined with `resolution_code`, `resolved_at` and
+> `resolved_by` all being read-only, you get a record sitting in Resolved with no resolution code and
+> no resolver. **A half-resolved record that looks finished is worse than an honest New.**
+
+**The asymmetry worth remembering, because it generalises:** read-only is a UI/API-layer control, not
+a database one. A **server-side** `GlideRecord` update — a UI Action, a Flow Designer *Update Record*
+step, a Business Rule, a Scripted REST resource — is not blocked by it **and still runs the state
+model**. That is why the form's **Resolve** button works: it is client script doing
+`g_form.setValue('state', …)` then `g_form.save()`. The UI buttons are `move_to_assess`,
+`move_to_rca`, `move_to_fix_in_progress`, `move_to_resolved` and `move_to_closed` in `sys_ui_action`.
+
+**So the design is: automation writes its findings, a human performs the state change.** The playbook
+writes `cause_notes`, `fix_notes` and `close_notes` — which do accept Table API writes — and sends no
+`state` and no `resolution_code`. The job is then honestly green when it has done everything it was
+asked to do, instead of reporting success for a transition that silently never happened.
+
+### 8.2 The playbook (Git)
+
+`servicenow_problem_handler.yml` on `main`. Same structure as the incident and SCTASK handlers: assert
+`SN_HOST`, display the payload, warn on missing routing keys, pick an investigation path, write a work
+note, then write the findings.
+
+Two things in it that exist because of §8.1:
+
+- The findings PATCH is **allowed to fail the job** — no `failed_when: false`. Those three fields do
+  accept writes, so a non-200 is a real fault (credential, network, record vanished), not the platform
+  declining a transition.
+- The **read-back is kept anyway**, and asserts `cause_notes` came back non-empty. A 200 that writes
+  nothing is exactly the failure this play hit three times. If the notes ever read back empty, the
+  message tells you to re-check `sys_dictionary` and `sys_dictionary_override` rather than blame the
+  credential.
+
+> ⚠️ `sn_resolve_problem` is a **deliberately inaccurate name**. It gates writing the findings, not
+> resolving. Renaming it means editing all three rulebooks, which invalidates their source-mapping
+> hashes and costs a sync + re-attach + restart per team. Batch the rename with your next rulebook
+> change rather than paying that cycle for cosmetics.
+
+### 8.3 Job templates — all of them, BEFORE you sync anything
+
+**Create the job template for every team before syncing any project.** The rulebooks name
+`Team A/B/C Problem Handler`; sync and restart before those exist and every problem fires a rule that
+cannot launch.
+
+> 🔴 **A missing job template fails silently from the ServiceNow side.** The stream counter moves, the
+> rule fires, **no job record is created**, the record is untouched and nothing is written back. The
+> only evidence is the activation log: `ERROR - Job template X in organization Y does not exist`.
+
+Each one: playbook `servicenow_problem_handler.yml`, job type **Run**, that team's
+organization / inventory / project, **Prompt on launch ON** next to Extra variables, and that team's
+ServiceNow credential.
+
+![The three Problem job templates](images/101-aap-problem-job-templates.png)
+
+### 8.4 The rulebook rule (Git + AAP)
+
+A third rule per rulebook, conditioned on **both** the stream name and
+`event.payload.event_type == "servicenow.problem.created"`. Map `problem_number`,
+`short_description`, `assignment_group`, `cmdb_ci`, `sys_id`, the three reserved routing keys,
+`source_stream`, and `sn_resolve_problem: true` — every one with `| default('')`.
+
+Then **sync → re-attach the stream mapping (gear icon) → restart**, per team. Batch rulebook edits so
+you pay that cycle once.
+
+> ✅ **Verify:** each activation's `rulebook_hash` equals
+> `git show <synced-revision>:rulebooks/team_x_rulebook.yml | shasum -a 256`.
+
+### 8.5 The action (ServiceNow)
+
+Copy **`Send SCTASK to Ansible EDA`**, not the incident one — it is the closer template. Name it
+**`Send Problem to Ansible EDA`**.
+
+Rename the record input to **`Problem Record`**, Reference → `Problem [problem]`, and keep
+`Team Code`, `Event Stream UUID` and `Connection Alias`.
+
+![The four action inputs on Send Problem](images/102-sn-problem-action-inputs.png)
+
+Then three things the copy leaves behind, all of which are easy to miss:
+
+| Where | Leftover | Fix |
+|---|---|---|
+| Step 1, output 4 | `incident_number` | Rename to **`problem_number`**. Miss this and your script writes to an undeclared output — silently dropped |
+| Step 3, `var LOG` | `EDA SendIncident/handleResponse:` | Change to `EDA SendProblem/…`, or Problem failures file themselves under the wrong name in `syslog` |
+| Step 3, inputs | no record identifier | Add a `problem_number` input fed from step 1's output and prefix it onto `error_message`, so a failed POST names the record |
+
+![Step 1 input and output variables](images/103-sn-problem-step1-vars.png)
+
+**Do not rewrite step 3's logic** — `Process Response` is record-type agnostic. Only the `LOG` prefix
+and that one extra input are worth changing.
+
+Step 1's script must satisfy the same contract as the other two, with `payload.event_type` reading
+**exactly** `servicenow.problem.created`. Read the record back with `GlideRecord` from the sys_id —
+every ext input is typed String, so a Reference pill arrives as a **sys_id, not a GlideRecord**.
+
+> 🔴 **If you are porting a payload script from another instance, check every field exists.** Ten
+> `u_*` fields on a Centene problem form do not exist here. `getFieldValue(undefined)` returns `''`
+> rather than throwing, so you ship ten permanently-empty keys and never hear about it. Verify
+> against `sys_dictionary` for `problem` **and** `task` — `state`, `priority` and `assignment_group`
+> all live on the parent.
+
+### 8.6 The flow (ServiceNow)
+
+**Workflow Studio → New → Flow**, named `Trigger EDA remediation on Problem`, **Run as: System user**.
+
+```
+TRIGGER  Problem Created  WHERE  Assignment group is not empty
+1  Look Up Record  on EDA Team Route
+       Conditions: Assignment group  is  <trigger> Problem Record > Assignment group
+                   Active            is  true
+       Don't fail on error:  TICKED
+2  If   EDA Team Route Record > Sys ID   IS EMPTY
+3        then  End Flow
+4  Send Problem to Ansible EDA
+5  If   Successful  →  work note / error work note
+```
+
+> ⚠️ **Put `Assignment group is not empty` on the trigger**, not just in the lookup. It costs nothing
+> and it stops the flow starting at all for a problem that cannot possibly route — which keeps the
+> Executions list readable, because every run you see is one that had a reason to run. Without it the
+> gate still protects you, but you accumulate a flow execution for every problem on the instance.
+
+Note the numbering: `End Flow` is a nested step and takes its own number, so the action is step **4**
+and the success If is step **5**. What matters is the *indentation* — only `End Flow` is inside the
+If; steps 4 and 5 are at the outer level.
+
+![The whole Problem flow](images/104-sn-problem-flow-overview.png)
+
+**Step 2 is the route gate, and it is the step the first build left out.** Without it, a problem whose
+assignment group has no route row still calls the action — with an empty connection alias and an empty
+stream UUID. You get a confusing failure and a work note on the record, when the real situation is
+just "this group is not onboarded".
+
+![The route gate — Sys ID is empty, then End Flow](images/105-sn-problem-flow-gate.png)
+
+> 🔴 **Two traps in that one If.**
+> 1. **Drill all the way down to `Sys ID`.** Dragging the `EDA Team Route Record` pill itself and
+>    comparing it to Empty is a *text comparison on a record object* — never equal to empty, so the
+>    condition is always false, `End Flow` never runs, and the gate does nothing while looking
+>    perfectly correct on screen.
+> 2. **`Don't fail on error` on step 1 is what makes the gate necessary.** It turns "found nothing"
+>    from a flow-aborting error into an empty record, which is what you want — but it also means the
+>    flow sails on with empty pills unless you check.
+
+This shape — a guard If containing only `End Flow`, with the real work left at the outer level — is
+deliberately flatter than wrapping steps 3 and 4 inside an `is not empty` If. Wrapping needs existing
+steps dragged into a branch, and half-dragging leaves a step outside the gate that still runs.
+
+Then map **four pills** into the action step:
+
+| Action input | Pill |
+|---|---|
+| Problem Record | `Trigger - Record Created ➛ Problem Record` — **bare** |
+| Team code | `1 ➛ EDA Team Route Record ➛ Team code` |
+| Event stream UUID | `1 ➛ EDA Team Route Record ➛ Event stream UUID` |
+| Connection alias | `1 ➛ EDA Team Route Record ➛ Connection alias` — **bare reference, not `➛ Sys ID`** |
+
+![The four pills mapped into the action step](images/106-sn-problem-flow-action-pills.png)
+
+> 🔴 **Never dot-walk a record pill to `➛ Number` or `➛ Sys ID`.** This cost a full debugging round
+> trip. There are **two independent mapping layers** that share variable names — the flow feeds the
+> action's inputs, and the action feeds step 1's inputs — and you must map bare in both:
+>
+> - The **action** input is typed Reference, so a string pill there resolves to **nothing**.
+> - Step 1's ext input is typed **String**, so `➛ Number` is type-compatible and silently delivers
+>   `PRB00400NN` — which single-argument `GlideRecord.get()` reads as a sys_id, giving
+>   `Problem not found: PRB00400NN`.
+>
+> **The diagnostic that tells the layers apart:** if `team_code` is *also* empty, the fault is the
+> **flow** layer, because `team_code` is never dot-walked — it comes straight from the route lookup.
+> A dot-walk off an *empty* Reference yields empty rather than erroring, so a flow-layer fault masks
+> an action-layer one. Fix the flow first; the dot-walk then announces itself as `Problem not found`.
+
+### 8.7 Test — both directions
+
+Take a baseline of all three stream counters and the latest job id first.
+
+**Test 1 — routed.** A problem with assignment group `Team-A`.
+
+| Expect | |
+|---|---|
+| Counter | `sn-team-a` +1, the other two **unchanged** |
+| Job | on that team's Problem template, `successful` |
+| Record | `cause_notes`, `fix_notes`, `close_notes` populated; **state still New** |
+| Job output | `findings written … State left at New BY DESIGN … This is a complete, successful run.` |
+| Work notes | two — `system` from the flow, then `admin` from the playbook |
+
+![Job output — findings written, state unchanged by design](images/107-aap-problem-job-output.png)
+
+![The problem record after automation](images/108-sn-problem-record-notes.png)
+
+**Test 2 — unrouted, which proves the gate.** A problem with the assignment group left blank, or set
+to a group with no route row.
+
+| Expect | |
+|---|---|
+| Work notes | **none at all** |
+| Counters | all three unchanged |
+| Jobs | none |
+| Flow | runs to `Complete`, having exited at the gate |
+
+> 🔴 **Run test 1 again after any gate change.** It is easy to build a gate that blocks
+> *everything*, and from test 2 alone that is indistinguishable from a gate that works.
+
+> ✅ **Verify in `sys_audit` for the record:** exactly five rows — two `work_notes`, then
+> `cause_notes`, `close_notes` and `fix_notes` at a single timestamp. **No `state` row and no
+> `resolution_code` row**, because neither was attempted. That is the signature of a correct run.
+
+---
+
+## Phase 9 — The other teams
+
+For Teams B and C, repeat **Phases 3, 4, 8.3 and 8.4 only**. The flows, the actions and the
+enrollment table are **shared across all teams** — the same property that makes adding a team cheap,
+and it holds for adding a record type too.
+
+A playbook-only change is cheaper still: no rulebook hash moves, so **no re-attach and no activation
+restart**. Push, merge, and sync the **controller** projects only. Confirm by checking that the
+activations' restart counts did not change.
+
+### What is actually built, as of 2026-10-02
+
+Not every team has every record type, and the gap is deliberate:
+
+| Team | Incident | SCTASK | Problem |
+|---|---|---|---|
+| Team A | ✅ JT 11 | ✅ JT 21 | ✅ JT 23 |
+| Team B | ✅ JT 12 | ✅ JT 22 | ✅ JT 24 |
+| Team C | ✅ JT 14 | ❌ **none** | ✅ JT 25 |
+
+**Team C has no SCTASK job template, and therefore no SCTASK rule in its rulebook.** That pairing is
+the point: adding a rule that names a job template which does not exist is exactly the silent failure
+§8.3 warns about, and it is what stranded one real task during the build. If you add the Team C SCTASK
+rule, **create job template `Team C SCTASK Handler` first.**
+
+> ✅ **Final verify:** for each team, every record type that team *has* a job template for lands on
+> that template, with only that team's stream counter moving. For Team C that is incident and problem
+> only — do not expect an SCTASK run to work there until the template above exists.
 
 ---
 
@@ -608,7 +938,13 @@ it holds for adding a record type too.
 | Enrollment If is false for an enrolled item | The reference qual hid the item, or `Active` is false on the row |
 | `Unable to load connection with alias ID:` | Connection alias pill dot-walked to Sys ID, or unresolved |
 | Stream counter moves, no job | Rulebook mismatch — compare `event_type` in the script against the rulebook condition, character for character |
+| Stream counter moves, no job, **and nothing in ServiceNow** | The job template does not exist. Silent from the ServiceNow side; the only evidence is the activation log — `ERROR - Job template X in organization Y does not exist`. See §8.3 |
 | `ERROR! 'sources' is not a valid attribute for a Play` | The job template's Playbook field is a rulebook |
 | Job fails on undefined variables | *Prompt on launch* is off on the job template |
 | `Rulebook has changed since the sources were mapped` | You skipped the re-attach in Phase 4 |
 | `target_team` empty | The action's `team_code` input is declared but its pill was never mapped |
+| `No <record> supplied. Step inputs present: team_code=empty, <record>=empty` | **Both empty means the *flow* layer**, not the action. `team_code` is never dot-walked, so if it is empty too, the flow is not feeding the action's inputs at all. Fix the flow's four pills first — see §8.6 |
+| `Problem not found: PRB00400NN` | A record pill dot-walked to `➛ Number`. Step 1's input is typed String so it accepts the number happily, then `GlideRecord.get()` reads it as a sys_id. Map the pill **bare** |
+| `Request not sent and the REST step reported no error.` | The REST step never left the instance — an **empty connection alias**, which on Problem means the route gate is missing and an unrouted record reached the action. See §8.5 |
+| A work note fires but the record's fields never change | Read-only field. HTTP 200 with **no `sys_audit` row** for that field means the Table API discarded it — check `sys_dictionary` *and* `sys_dictionary_override`. Not a permission fault, not the state model. See §8.1 |
+| Ten payload keys are always empty | Ported a script from another instance whose `u_*` fields do not exist here. `getFieldValue(undefined)` returns `''` instead of throwing |

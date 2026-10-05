@@ -106,11 +106,27 @@ Incident created  (trigger condition: Assignment group is not empty)
   │     │       └─ step 3  Script    normalise status → outputs
   │     │
   │     └─ 4. If  Action → Success  is false
-  │              └─ 5. Create Record ── EDA Publish Log   (all pills)
+  │              └─ 5. Update Record ── work note carrying the action's Error Message
   │
   └─ Else
-        └─ 6. Create Record ── EDA Publish Log, "no route for group"
+        └─ (nothing — the flow ends)
 ```
+
+> 🔴 **Steps 5 and 6 were planned as `Create Record ── EDA Publish Log` and were never built.**
+> Corrected 2026-10-02 after reconciling this guide against the live instance. The
+> `x_661661_james_tes_eda_publish_log` table **does exist** — 13 columns, ACLs, UI list, licensing
+> config, all created — but **no flow references it and it holds zero rows** after 21 events across
+> the three streams. All three flows report failure by writing a **work note on the record itself**,
+> which is where you should look.
+>
+> Two consequences if you decide to build it after all:
+> 1. Its `incident` column is a reference to `incident`, so it serves the incident era only. SCTASK
+>    and Problem would need either a polymorphic `task` reference or their own columns.
+> 2. The troubleshooting table in §8 used to tell you to diagnose by reading publish-log rows. Those
+>    rows do not exist; that table now points at the work note and the flow's Executions tab instead.
+>
+> Leaving the table in place is deliberate — it costs nothing and it is the schema you would want if
+> a central log ever becomes worth having. Just do not document it as if it were wired up.
 
 One route row per assignment group, so one record, so no loop. If you ever need one incident to
 fan out to **several** EDA endpoints, switch to the plural `Look Up Records` action and a
@@ -305,7 +321,13 @@ _The `EDA Team Route` table — six columns and their types._
 
 _The two route rows. Team code, assignment group, stream name and connection alias are visible; the Event stream UUID column is redacted because this repo is public._
 
-### 5.4 Failure log table
+### 5.4 Failure log table — OPTIONAL, and not currently wired up
+
+> ⚠️ **Skip this section on a first build.** The table below exists on the instance exactly as
+> specified, but **no flow writes to it** and it holds **zero rows**. Verified 2026-10-02. The flows
+> report failure with a work note on the record instead, which is simpler and puts the error where
+> whoever is looking at the ticket will see it. Build this only if you later want a central,
+> queryable failure history across teams.
 
 Label **`EDA Publish Log`** → `x_661661_james_tes_eda_publish_log`
 
@@ -319,8 +341,12 @@ Label **`EDA Publish Log`** → `x_661661_james_tes_eda_publish_log`
 | Error message | String | 4000 |
 | Payload | String | 8000 |
 
-Populated entirely with pills by a **Create Record** step — no script. Closes the gap where a
-failed POST set `error_message` and nothing ever read it.
+Intended to be populated entirely with pills by a **Create Record** step — no script.
+
+> 🔴 **The `Incident` column makes this incident-only.** It is a reference to `incident`, so it
+> cannot log an SCTASK or a Problem failure as built. If you wire it up now that three record types
+> exist, change that column to a reference to **`task`** (the common parent) or add one column per
+> record type. A central log that silently drops two thirds of your failures is worse than no log.
 
 ### 5.5 Action inputs
 
@@ -678,7 +704,7 @@ Declare **two** input variables on this step, with these exact names:
 
 ### 6.2 Step 3 — normalise the response
 
-> **Paste from the file, not from here:** `docs/scripts/step3_process_response.js`.
+> **Paste from the file, not from here:** [`docs/scripts/incident_step3_process_response.js`](scripts/incident_step3_process_response.js). All six step scripts are indexed in [`docs/scripts/README.md`](scripts/README.md).
 > It is the canonical copy, pure ASCII, and verified with `node --check`. Copying out of a
 > rendered document can convert straight quotes to curly ones, which breaks the script
 > silently. This block is a mirror of that file - if they ever disagree, the file wins.
@@ -821,14 +847,22 @@ are visible. A blank `target_team` here means step 1 is missing its `team_code` 
 Expect `sn-team-a` to increment and `sn-team-b` to stay flat. Then repeat with **Team-B** and
 expect the mirror image — that is Experiment 1 (isolation).
 
+**Where to look when something fails.** There is no central log table — see the callout in §4. Your
+two diagnostic surfaces are the **work note on the record** (written by the flow's failure branch,
+carrying the action's `Error Message`) and the flow's **Executions** tab in Workflow Studio, which
+shows every step with its inputs and outputs.
+
 | Symptom | Most likely cause |
 |---|---|
 | No stream counter moves | Flow did not run — check the trigger condition and the Sys ID gate (§5.9) |
-| `EDA Publish Log` row with 401 | Token mismatch. Compare lengths on both sides — 64 chars — and confirm the value is bare with no prefix (§5.2) |
-| `EDA Publish Log` row with 404 | `resource_path` pill resolved empty, or a stale UUID in the route row |
+| Work note shows **401** | Token mismatch. Compare lengths on both sides — 64 chars — and confirm the value is bare with no prefix (§5.2) |
+| Work note shows **404** | `resource_path` pill resolved empty, or a stale UUID in the route row |
+| Work note shows `Unable to load connection with alias ID:` with **nothing after `sys_id=`** | The Connection alias pill is unresolved, or was dot-walked to Sys ID instead of fed bare |
+| Work note shows `Request not sent and the REST step reported no error.` | The request never left the instance — an empty connection alias. On a record type with no enrollment gate, this means an unrouted record reached the action and the Sys ID gate is missing |
 | Counter moves, no job launches | Rulebook mismatch — compare `event_type` and `eda_event_stream_name` |
+| Counter moves, no job, **and nothing in ServiceNow at all** | The job template named by the rule does not exist. Silent from this side; the only evidence is the activation log |
 | Both teams' rules fire on one event | Both activations mapped to the same stream — fan-out, not a queue |
-| Nothing in the log table on failure | `Success` pill wired to the wrong step output |
+| No work note at all on a failure | Either the `Success` pill is wired to the wrong step output, or the flow exited at the route gate — which is correct behaviour for a record whose assignment group has no route row. Check Executions to tell these apart |
 
 ---
 
