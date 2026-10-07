@@ -230,7 +230,7 @@ ansible_rulebook.engine - INFO - load source eda.builtin.pg_listener
 
 ---
 
-## 5. 🔴 Two rulebooks in this repo are dangerous — leave them alone
+## 5. 🔴 Two rulebooks in this repo must not be attached — leave them alone
 
 Your EDA project discovers **every** rulebook in the repository and offers all five when you create
 an activation ([03 §2.12](03-aap-eda-setup.md)). Nothing filters the list, and two of the five must
@@ -242,7 +242,13 @@ an activation ([03 §2.12](03-aap-eda-setup.md)). Nothing filters the list, and 
 | `team_b_rulebook.yml` | ✅ live | Team B, three record types |
 | `team_c_rulebook.yml` | ✅ live | Team C, incident and problem only |
 | `catchall_debug_rulebook.yml` | 🔴 **never attach** | **Matches every event on purpose.** Attach it to an activation sharing a stream and it double-launches every job |
-| `my_eda_rulebook.yml` | 🔴 **never attach** | A teaching example only. It matches the retired flat `event_type` value `incident_created`, so it **cannot fire** against any current payload, and it names a job template and organization that do not exist |
+| `my_eda_rulebook.yml` | 🔴 **never attach as-is** | **Reference only, kept deliberately** — the single-stream, single-team shape, for anyone who wants *one* rulebook rather than one per team. Inert as shipped: retired `event_type` values, a job template and organization that do not exist, and two `<...>` placeholders. Its header comment lists the four things to change |
+
+> ℹ️ **Why `my_eda_rulebook.yml` is kept rather than deleted** (decided 2026-10-07): the per-team
+> shape in this repo is a *choice*, not the only option, and this file is the smallest honest example
+> of the alternative. It is also instructive in one specific way — it does **not** test
+> `event.meta.eda_event_stream_name`, which is exactly what you can omit with one stream and must add
+> the moment you have two ([§2.2](#22-the-condition)).
 
 > ⚠️ **`catchall_debug` is the dangerous one, because it works.** It will fire, launch jobs, and move
 > stream counters. The symptom — several rules firing for one event — looks identical to

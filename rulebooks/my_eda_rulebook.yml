@@ -1,13 +1,24 @@
 ---
-# DEPRECATED - single-stream, single-team original. Superseded by team_a_rulebook.yml and
-# team_b_rulebook.yml plus the EDA Team Route table (docs/servicenow-dynamic-team-routing.md).
+# REFERENCE ONLY - the original single-stream, single-team shape. KEPT ON PURPOSE as a starting
+# point for anyone who wants ONE rulebook instead of one per team. Decided 2026-10-07; do not
+# delete it. The per-team production shape is team_a/b/c_rulebook.yml plus the EDA Team Route
+# table - see docs/04-servicenow-app.md and docs/design-decisions.md section 1.
 #
-# It expects the old `incident_created` event_type and cannot match the current payload, so it
-# matches nothing even if activated. Activation 1 (ServiceNow Event Stream Rulebook) is stopped.
+# DO NOT ATTACH THIS TO AN ACTIVATION AS-IS. It is inert: three things below are stale or
+# placeholder, and it matches nothing even if activated.
 #
-# NOT deleted yet because README Parts 2 and 4 still walk a first-time reader through the
-# single-team build using this file. Delete it together with that rewrite, not before, or the
-# README's own instructions break. Order when you do: activation 1 -> stream 1 -> credential 4.
+# To make it a working single-team rulebook, change all four:
+#   1. event_type values     "incident_created" -> "servicenow.incident.created"
+#                            "sctask_created"   -> "servicenow.sctask.created"
+#                            The current payload contract is docs/05-servicenow-action.md section 7.
+#   2. run_job_template.name "ServiceNow Incident Handler" does not exist. Use a real template
+#                            name - it is matched as an exact string, see docs/rulebook-anatomy.md.
+#   3. organization          "Default" - point it at the organization that owns the template.
+#   4. the <...> placeholders in the sctask rule.
+#
+# It deliberately does NOT test event.meta.eda_event_stream_name. That is fine for one stream and
+# one team, and it is exactly what you must add if you ever run more than one - without it, every
+# activation on a shared stream fires on every event. docs/rulebook-anatomy.md section 2.2.
 - name: ServiceNow Incident Automation - Simple Test
   hosts: all
   sources:

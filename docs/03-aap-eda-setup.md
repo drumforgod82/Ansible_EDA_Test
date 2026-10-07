@@ -207,7 +207,7 @@ The playbook runs `hosts: localhost` with `connection: local`, so one host is al
 | Credential | Type | Contents |
 |---|---|---|
 | `<Team> Source control` | Source Control | Git username + PAT — **omit entirely for a public repo** |
-| `<Team> ServiceNow PDI` | `ServiceNow` (the custom type from §1) | Host `https://<your-pdi>.service-now.com`, username, password |
+| `ServiceNow PDI - <Team>` | `ServiceNow` (the custom type from §1) | Host `https://<your-pdi>.service-now.com`, username, password |
 
 This is what makes one shared playbook safe across teams: the playbook reads `SN_HOST` from whichever
 credential the job template carries, so each team can point at a different instance without the
@@ -252,7 +252,7 @@ Sync it. `collections/requirements.yml` installs automatically during the sync, 
 | Project | `EDA ServiceNow - <Team>` |
 | Playbook | `servicenow_incident_handler.yml` |
 | Execution environment | Default execution environment |
-| Credentials | `<Team> ServiceNow PDI` |
+| Credentials | `ServiceNow PDI - <Team>` |
 | **Variables → Prompt on launch** | ✅ **REQUIRED** |
 
 Three traps here, and all three cost real time.
@@ -391,8 +391,9 @@ pick the right one by hand in §2.12; nothing filters the list for you.
 > 🔴 **Two of those five must never be attached to an activation.**
 > `catchall_debug_rulebook.yml` **matches every event on purpose** — attach it and it double-launches
 > every job, while producing a symptom that looks like a completely different fault.
-> `my_eda_rulebook.yml` is a teaching example that cannot fire. Details and the full list:
-> [Rulebook anatomy §5](rulebook-anatomy.md#5--two-rulebooks-in-this-repo-are-dangerous--leave-them-alone).
+> `my_eda_rulebook.yml` is a single-team reference shape and is inert as shipped. Both are kept
+> deliberately. Details and the full list:
+> [Rulebook anatomy §5](rulebook-anatomy.md#5--two-rulebooks-in-this-repo-must-not-be-attached--leave-them-alone).
 
 ![EDA project settings](images/24-eda-project.png)
 
@@ -572,7 +573,7 @@ That `<uuid>` goes into this team's route-table row in ServiceNow.
 | Name | `<team>-incidents` |
 | Organization | `<Team>` |
 | Project | `Ansible EDA Test - <Team>` |
-| Rulebook | `team_<x>_rulebook.yml` — **pick carefully; the list shows all five, and two are dangerous** ([why](rulebook-anatomy.md#5--two-rulebooks-in-this-repo-are-dangerous--leave-them-alone)) |
+| Rulebook | `team_<x>_rulebook.yml` — **pick carefully; the list shows all five, and two must not be attached** ([why](rulebook-anatomy.md#5--two-rulebooks-in-this-repo-must-not-be-attached--leave-them-alone)) |
 | Credential | `<Team> AAP Controller` |
 | Decision environment | `DE Supported RHEL9 - <Team>` |
 | Restart policy | On failure |

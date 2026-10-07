@@ -193,3 +193,33 @@ Notes:
   `0228797bc3ef4b14b08b9b377d0131c8`.
 
 Last pulled from the PDI: **2026-10-05**.
+
+---
+
+## Self-check
+
+**Did I skip any prerequisite steps?** No. §4 puts *declare the variables first* ahead of pasting,
+because a script assigning to an undeclared output is silently dropped — which is the failure this
+directory exists to prevent, and it happens before you can test anything. The one prerequisite that
+is deliberately out of scope is what the pipeline *is*; §0 links the main README for that rather than
+restating it.
+
+**Is every command copy-paste ready with context?** The two commands here are the
+`sys_variable_value` GET in §7 and its negative control. Both state the table, the filter and what a
+correct result looks like — two rows per step, exactly one beginning `(function`. The negative
+control is not optional advice: an unknown column in `sysparm_query` is **silently ignored** and
+returns the whole table, so a result you have not controlled for proves nothing.
+
+**Would a complete novice understand every single sentence?** The hardest idea is that a step's
+declared variable name, the pill feeding it, and the name the script reads are three separate things
+that must agree — stated at the top of §3 before any table uses it. The `step2` gap in the numbering
+is explained where it would otherwise read as a missing file.
+
+**Verified against the live PDI, 2026-10-07.** Every declared input and output in §3 matches what the
+six scripts actually read and assign; all three `event_type` values; every action and step sys_id
+resolves; `sys_variable_value` returns exactly two rows per step with exactly one beginning
+`(function`; the bogus-key negative control returns zero rows; the `'(unknown task)'` fallback in
+§6 is where §6 says it is; and all six files are pure ASCII. The record-number payload keys the
+rulebooks read — `incident_number`, `task_number`, `problem_number` — all match what the scripts
+emit. **Note `task_number`, not `sctask_number`:** the SCTASK step *output* is `sctask_number` while
+the *payload key* is `task_number`. Those are two different layers and both are correct.

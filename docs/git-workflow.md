@@ -239,3 +239,31 @@ fails with `Rulebook has changed since the sources were mapped`.
 
 A playbook-only change is cheap, and you can **prove** you took the cheap path: the activations'
 restart counts should not change.
+
+---
+
+## Self-check
+
+**Did I skip any prerequisite steps?** No, and the ordering constraint that actually costs a pull
+request is called out where it bites: under *Getting out of the trap permanently*, step ① (untick
+**Require linear history**) must happen **before** step ② (change the merge methods), because
+ticking *Allow merge commits* while the rule is live leaves no legal merge method at all. That was
+learned across PRs #16–#18.
+
+**Is every command copy-paste ready with context?** Yes. The diagnosis commands, the back-merge
+habit, the worktree merge-test and the two-parent verification all state what correct output looks
+like. The one that matters most is the ancestor test, because **its argument order is the whole
+check** — `origin/dev origin/main` answers "has every `dev` commit landed on `main`", and the
+reverse false-alarms after every merge-commit PR.
+
+**Would a complete novice understand every single sentence?** The hard part is that two healthy-
+looking signals mean opposite things: `main ahead N, dev ahead 0` is the normal steady state and
+grows by one per PR, while *both* counters non-zero with identical file content is the squash trap.
+Both are stated with the command that distinguishes them, because a tree comparison cannot — that is
+the single most counter-intuitive fact in this document and it is stated twice.
+
+**Corrected 2026-10-07.** This page previously said to expect `main ahead 1, dev ahead 0` "from here
+on", which false-alarms as soon as a second merge-commit PR lands. It is `ahead N` after N PRs. The
+wrong-direction ancestor check caused a bad "you must back-merge first" recommendation on the same
+day, which is why that warning is now explicit about argument order.
+

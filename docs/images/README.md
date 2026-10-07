@@ -4,12 +4,11 @@ Screenshots displayed by the numbered build guides — [03](../03-aap-eda-setup.
 [04](../04-servicenow-app.md), [05](../05-servicenow-action.md), [06](../06-servicenow-flow.md) and
 [09](../09-reconnect-after-aap-rebuild.md) — plus
 [Adding a record type](../adding-record-types.md), the
-[OAuth appendix](../appendix-oauth-direct-launch.md), the root [README](../../README.md) and the
-superseded [Dynamic team routing](../servicenow-dynamic-team-routing.md).
+[OAuth appendix](../appendix-oauth-direct-launch.md) and the root [README](../../README.md).
 
 ## Files kept on disk but not displayed
 
-**Verified 2026-10-07: 54 PNGs on disk, 48 displayed, 6 not displayed.** All six are listed below so
+**Verified 2026-10-07: 52 PNGs on disk, 48 displayed, 4 not displayed.** All four are listed below so
 the inventory reconciles — **not** because a page is missing an image. Re-check with:
 
 ```bash
@@ -47,17 +46,27 @@ image and placed in `06`; one was rejected.**
 > reproduce that shape** — build the gate from
 > [06 §3.2](../06-servicenow-flow.md#32-the-sys-id-gate) first, then capture.
 
-**Not displayed — rejected on review:**
+### Deleted 2026-10-07 — reviewed, obsolete, removed
 
-| File | Why |
+Both are in git history. Neither was displayed by any page.
+
+| File | Why it was deleted |
 |---|---|
-| `62-sn-flow-if-success.png` | **Obsolete, four ways at once.** The flow is named `…on Incident` not `…on Incident-EDA`; the Workflow Studio tabs read **`Flow • Global`** and `Action • Global`, contradicting the scope check `06 §1` opens with; the trigger shows only the `Caller` half of its condition; and there is no route lookup. The header also carries an *Autosave error / Force save?* state. Its only unique content — the `If` on the action's `Success` output — is adequately covered by `64`, which shows the same branch from the outside. **Safe to delete** |
+| `62-sn-flow-if-success.png` | **Obsolete four ways at once.** The flow was named `…on Incident` not `…on Incident-EDA`; the Workflow Studio tabs read **`Flow • Global`**, contradicting the scope check `06 §1` opens with; the trigger showed only the `Caller` half of its condition; and there was no route lookup. It also carried an *Autosave error* state. Its only unique content — the `If` on the action's `Success` output — is covered by `64` |
+| `28-eda-event-stream-url.png` | **Obsolete, not merely superseded.** Showed the retired *single shared* stream (`ServiceNow Event Stream`, organization `Default`), which no longer exists, and its callout read "Copy this URL for ServiceNow REST Message" — the Appendix A OAuth pattern, not the event-stream design these guides use |
 
-### Obsolete
+### Orphaned by the routing-guide deletion (2026-10-07) — all four now placed
 
-| File | Why it is not displayed |
-|---|---|
-| `28-eda-event-stream-url.png` | **Obsolete, not merely superseded.** Shows the retired *single shared* stream (`ServiceNow Event Stream`, organization `Default`), which no longer exists, and its callout reads "Copy this URL for ServiceNow REST Message" — that is the Appendix A OAuth pattern, not the event-stream design this guide uses. Safe to delete; kept only so the count reconciles |
+`docs/servicenow-dynamic-team-routing.md` was deleted, which left four images it alone displayed.
+Each was opened and checked before placing — the index description alone was not trusted, because
+`64`'s had been wrong:
+
+| File | Where it is now | What it shows |
+|---|---|---|
+| `73-sn-step1-input-vars.png` | [05 §3.1](../05-servicenow-action.md) | Step 1's declared **input** variables (`Incident_record`, `team_code`) with pills, its four declared outputs, and the script's case-sensitivity comment. **Its `Incident_record` pill reads `action ▸ … ▸ Number`**, which `05 §3.2` warns against — flagged there as something to verify in the UI rather than asserted as a fault |
+| `75-sn-lookup-record-step.png` | [06 §3.1](../06-servicenow-flow.md) | The singular **Look Up Record** step fully expanded — table, both conditions, *Return only the first record*, and **Don't fail on error** ticked. Every field in `06 §3.1`'s table, in one view |
+| `95-aap-job-extra-vars.png` | [07 §4](../07-end-to-end-test.md) | A successful job's **Extra variables**, including `target_team` and `source_stream`, plus the `ansible_eda` block and `meta.source.type: eda.builtin.pg_listener`. Record `sys_id`, stream UUID and event `uuid` are masked |
+| `74-sn-step3-input-vars.png` | [05 §5.1](../05-servicenow-action.md) | Step 3's three **lowercase** declared inputs, with arrows to the title-case outputs they map from on the POST step — the clearest single view of the two-layer wiring — plus the four declared outputs. Opened and confirmed 2026-10-07 |
 
 If you recapture any of the superseded ones, display the new one and delete the old rather than
 growing this list.
@@ -79,7 +88,6 @@ text, so keep them masked in any replacement capture.
 | `24-eda-project.png` | EDA project settings |
 | `26-eda-event-stream-credential.png` | ServiceNow Event Stream credential — auth type token, header key Authorization |
 | `27-eda-event-stream.png` | Event stream definition |
-| `28-eda-event-stream-url.png` | ⚠️ **Obsolete — not displayed by any page.** See the table at the top of this file; it shows the retired single shared stream. Kept only so the inventory reconciles |
 | `25-eda-rulebooks.png` | Rulebook activation form, showing the Event streams field mapped to the event stream |
 | `31-activation-running.png` | Activation in Running state |
 | `40-sn-credential-alias.png` | Connection & Credential Alias |
@@ -93,7 +101,6 @@ text, so keep them masked in any replacement capture.
 | `50.1-sn-script-step-inputs.png` | Script step input variables and script body |
 | `60-sn-flow-trigger.png` | Flow trigger — Created on Incident with a condition |
 | `61-sn-flow-action-input.png` | Action step with the Incident Record dragged in |
-| `62-sn-flow-if-success.png` | If condition on the action's Success output. ⚠️ **Not displayed — obsolete.** See the rejection note above |
 | `63-sn-flow-update-record.png` | Then → Update Record with work notes |
 | `64-sn-flow-end-flow.png` | `End Flow` inside the If's `then` branch, with the failure-path Update Record after the branch. **Renamed 2026-10-07** from `64-sn-flow-log-info.png` — it contains no Log step |
 | `66-sn-flow-error-handler.png` | Full flow with the error handler expanded |
@@ -167,3 +174,29 @@ original mistake.
 
 This distinction matters beyond the lab. On the Centene port nothing is disposable, so the rule there
 is the same shape but stricter: UUIDs and tokens never leave the instance.
+
+---
+
+## Self-check
+
+**Did I skip any prerequisite steps?** This file performs no build steps. Its one job is to make the
+inventory reconcile, so the prerequisite is the count — and the command that proves it is in the
+*Files kept on disk but not displayed* section rather than being asserted as a number you have to
+trust.
+
+**Is every command copy-paste ready with context?** The single command is the `comm` pipeline that
+lists on-disk PNGs not referenced by any markdown file. It states its working directory and its
+expected output is the table beneath it. Run 2026-10-07: **52 on disk, 48 displayed, 4 not.**
+
+**Would a complete novice understand every single sentence?** The distinction this file exists to
+carry is **superseded** versus **obsolete** — superseded means recapture and replace, obsolete means
+delete — and the tables are grouped by that difference rather than mixing them. The redaction rule is
+stated as what is and is not a secret, with the reasoning, because "mask everything" and "mask
+nothing" are both wrong here: a stream UUID is a POST path paired with a token, while a record
+`sys_id` on a throwaway PDI is not a credential.
+
+**What this file cannot tell you.** It records what each image *should* show. Twice now that has been
+wrong — `100` showed the opposite of its caption, and `64`'s description named a Log step the image
+does not contain. **Open the file before trusting a row**, especially before deleting or re-placing
+one.
+

@@ -75,7 +75,7 @@ Several notes in this repository refer to it, so here is what it is:
 
 > 🔴 **While it exists, never attach `catchall_debug_rulebook.yml` to a production activation.** It
 > matches every event on purpose. See
-> [Rulebook anatomy §5](rulebook-anatomy.md#5--two-rulebooks-in-this-repo-are-dangerous--leave-them-alone).
+> [Rulebook anatomy §5](rulebook-anatomy.md#5--two-rulebooks-in-this-repo-must-not-be-attached--leave-them-alone).
 
 ### 1.4 This is our decision, not Red Hat's recommendation
 
@@ -245,6 +245,63 @@ Only one thing: **ServiceNow taking back ownership of automation selection from 
 is an architectural reversal, not incremental growth. "More streams" is not a trigger — thirty
 streams keyed on one attribute is still a foreign key.
 
+> ℹ️ **If it ever is reopened, two findings from the PDI build are worth not rediscovering.** The
+> scriptable entry point is **`sn_dt.CachedDecisionTableAPI`**, and `executeDecisions(dt, input)` is
+> the method that returns answers — every `sn_decision_table.*` Script Include is `package_private`
+> and unusable from a scoped app. And calling it creates a `sys_scope_privilege` row **per method,
+> not per class**, so `isEmptyDecisionTable` and `executeDecisions` are two separate grants. A
+> background script auto-grants them; **a flow running in the background fails instead.** Pre-grant
+> both.
+
+### 3.5 If you ever need to route on more than the assignment group
+
+**You almost certainly do not.** This applies only when **the team itself changes with record
+content** — "P1 database incidents go to Team B even though the group says Team A". If the
+destination is stable and only the *work* differs, that is a rulebook condition, not a routing
+change, and §3.3 is why.
+
+The concrete version of §3.3, because it is easy to agree with in the abstract and then build the
+wrong thing: a team wanting different automation per priority needs **no ServiceNow change at all**.
+The payload already carries `priority`, `state`, `urgency`, `impact`, `category`, `cmdb_ci` and
+`short_description`, so the rulebook dispatches on its own:
+
+```yaml
+    - name: Launch Team A critical handler
+      condition: >-
+        event.meta.eda_event_stream_name == "sn-team-a" and
+        event.payload.event_type == "servicenow.incident.created" and
+        event.payload.priority == "1"
+      action:
+        run_job_template:
+          name: "Team A Critical Incident Handler"
+          organization: "Team A"
+```
+
+One row per team in ServiceNow, branching in a purpose-built rule engine, and changes shipping
+through Git instead of Flow Designer.
+
+**If the destination genuinely must vary**, the cheapest extension is extra match columns on
+`EDA Team Route` — say `Priority` and `Category` (String) — with an empty column meaning *any value*.
+It needs no script. Two details decide whether it works:
+
+1. **Express each optional field as two OR'd condition rows, not an "is one of".** The pair is
+   `Priority is empty` **OR** `Priority is <the record's priority>`. The `is empty` row is what makes
+   a blank column behave as a wildcard.
+2. **Add an `Order` column (Integer) and set the lookup's `Order by` to it, ascending.** Give specific
+   rows a *lower* number than catch-all rows.
+
+> 🔴 **Point 2 is not optional, and skipping it produces a bug that looks like flakiness.** With
+> wildcards, **more than one row matches** — a `Priority = 1` row and a `Priority` empty row both
+> satisfy a critical incident. *Return only the first record* then picks whichever the sort puts
+> first, so with no explicit `Order by` the winner is **effectively arbitrary and appears to change
+> for no reason.**
+
+A third shape exists — a **Conditions**-type column on each row, giving every route row its own
+condition builder, resolved by a script step that walks rows in `Order` and returns the first match.
+It is more flexible and costs a script step. It was designed and never built; the working draft is in
+git history in `docs/servicenow-dynamic-team-routing.md` §10 (removed 2026-10-07) if it is ever
+wanted.
+
 ---
 
 ## 4. Open questions — genuinely unsettled
@@ -254,7 +311,7 @@ These are recorded as unknown rather than guessed at.
 | Question | Status | How to settle it |
 |---|---|---|
 | ~~Does a bad token return `401` or `403`?~~ | **SETTLED 2026-10-07: `403`.** A missing header is `400`, and so is an unknown UUID — `404` is never returned | Measured; commands recorded in [07 §2.1](07-end-to-end-test.md) |
-| Is `spec.api` the right Custom Resource path? | **Unconfirmed.** A merge patch silently discards unknown fields, so a wrong path looks like success | `K explain ansibleautomationplatform.spec` — see [01 §4](01-provision-aap.md) |
+| ~~Is `spec.api` the right Custom Resource path?~~ | **SETTLED 2026-10-07 — yes, on AAP 2.7.** `K explain ansibleautomationplatform.spec.api` describes it as *"The gateway api deployment"*, and it patches the **`api` container of the gateway Deployment** — so the verification output reads `api=2Gi`, not `gateway=2Gi` | Verified against the live CR — [01 §4](01-provision-aap.md) |
 | Is fan-out real, or only inferred? | **Inferred from source**, not observed | Experiment 4, §1.3 |
 | Can an activation select another organization's stream? | **Undocumented and untested upstream** | See §4.1 below — but do not design on the answer |
 

@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
 """Verify one team's EDA + ServiceNow wiring end to end, before testing it with a real incident.
 
-Every ``✅ Verify`` step in the README and the routing guide is a human eyeball. This script
-replaces the mechanical subset of them with assertions, so the four failures that are known to
-happen *silently* cannot reach a live test:
+Every ``✅ Verify`` step in the numbered guides is a human eyeball. This script replaces the
+mechanical subset of them with assertions, so the five failures that are known to happen *silently*
+cannot reach a live test:
 
 1. A rulebook copied from another team with a name left behind.
 2. A job template pointing at a rulebook instead of ``servicenow_incident_handler.yml``.
 3. ``ask_variables_on_launch`` off, which discards every extra_var the rulebook sends.
 4. A ServiceNow route row whose event stream UUID does not match the AAP stream it names.
+5. A route row that looks healthy but is **not the row routing selects** -- because the flow keys on
+   ``assignment_group`` while this script finds the row by ``team_code``. Two active rows for one
+   group, or zero, both pass every other check here.
 
-Number 4 is the one no amount of careful clicking catches: both sides look right in isolation and
-only disagree when compared. That cross-system check is the main reason this script exists.
+Numbers 4 and 5 are the ones no amount of careful clicking catches. For 4, both sides look right in
+isolation and only disagree when compared. For 5, the row on screen is correct and simply is not the
+one the flow will use. Those two cross-checks are the main reason this script exists.
 
 Read-only. It issues GETs and never writes to AAP, ServiceNow, or Git.
 
@@ -585,18 +589,16 @@ def check_servicenow(
             f'assignment group "{names.assignment_group}" is active',
         )
 
-    rows = snow.table(
-        route_table,
-        f"team_code={names.code}",
-        [
-            "team_code",
-            "assignment_group",
-            "event_stream_name",
-            "event_stream_uuid",
-            "connection_alias",
-            "active",
-        ],
-    )
+    route_fields = [
+        "sys_id",
+        "team_code",
+        "assignment_group",
+        "event_stream_name",
+        "event_stream_uuid",
+        "connection_alias",
+        "active",
+    ]
+    rows = snow.table(route_table, f"team_code={names.code}", route_fields)
     if not out.record(bool(rows), f'route row team_code="{names.code}" exists in {route_table}'):
         return
     row = rows[0]
@@ -612,6 +614,48 @@ def check_servicenow(
         f'route row names stream "{names.stream}"',
         detail=f'found {field(row, "event_stream_name")!r}',
     )
+
+    # Everything above found the row by `team_code`, which is NOT how routing works. The flow looks
+    # the row up by `assignment_group` with "Return only the first record", so re-run that exact
+    # query and confirm it lands on the same row. Checking only the team_code row passes while the
+    # flow routes somewhere else entirely -- see the duplicate case below.
+    if groups:
+        group_sys_id = raw_field(groups[0], "sys_id")
+        live_rows = snow.table(
+            route_table,
+            f"assignment_group={group_sys_id}^active=true",
+            route_fields,
+        )
+        # 04 section 4.1 requires exactly one active row per assignment group. Nothing enforced it
+        # until now: two active rows for one group means the flow's "first record" wins arbitrarily,
+        # and it may not be the row this script just declared healthy.
+        if out.record(
+            len(live_rows) == 1,
+            f'exactly one active route row keyed on group "{names.assignment_group}"',
+            detail=(
+                f"found {len(live_rows)}.\n"
+                + (
+                    "No active row is keyed on this group, so no record assigned to it can route,\n"
+                    "even though the team_code row above looks correct."
+                    if not live_rows
+                    else "Two or more active rows match this group. The flow returns only the first\n"
+                    "and which one that is, is effectively arbitrary. Deactivate the extras:\n"
+                    + "\n".join(
+                        f'  team_code={field(r, "team_code")!r} stream={field(r, "event_stream_name")!r}'
+                        for r in live_rows
+                    )
+                )
+            ),
+        ):
+            out.record(
+                raw_field(live_rows[0], "sys_id") == raw_field(row, "sys_id"),
+                "the row routing actually selects is the row checked above",
+                detail=(
+                    f'routing selects team_code={field(live_rows[0], "team_code")!r}, '
+                    f'but this run verified team_code={field(row, "team_code")!r}.\n'
+                    "Everything above describes a row the flow will never use."
+                ),
+            )
 
     alias = field(row, "connection_alias")
     out.record(bool(alias), "route row has a connection alias", info=f"alias: {alias}" if alias else "")
