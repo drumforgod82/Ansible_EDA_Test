@@ -1,6 +1,16 @@
 \
 # Phase 2b — The Two-Organization Topology (Team A / Team B)
 
+> 🔴 **SUPERSEDED — do not build from this document.**
+>
+> [03 — AAP / EDA setup](03-aap-eda-setup.md) and [Design decisions](design-decisions.md) replace it.
+>
+> **Two known errors remain here:** it refers to a **Team D** that does not exist in this repository,
+> and it expects an activation log string (`ServiceNow incident automation`) that has since been
+> renamed to `event automation`.
+>
+> Kept for now; it will be removed.
+
 **Historical record and reference.** Not a worklist — the build it described is finished. This
 covers the personal lab (ServiceNow PDI `dev211593.service-now.com` + Red Hat Developer Sandbox AAP
 **2.7**), not a corporate system. No enterprise change-control framing applies here.
@@ -20,8 +30,8 @@ covers the personal lab (ServiceNow PDI `dev211593.service-now.com` + Red Hat De
 > | To do this | Go here |
 > |---|---|
 > | Add a team, by hand or by script | [Routing guide §9](servicenow-dynamic-team-routing.md#9-adding-a-team-worked-example-team-c) |
-> | Understand each object in detail | [README Part 2](../README.md#part-2--per-team-setup) |
-> | See the whole build order | [README Build order](../README.md#build-order--do-these-in-this-exact-sequence) |
+> | Understand each object in detail | [README Part 2](03-aap-eda-setup.md) |
+> | See the whole build order | [README Build order](../README.md#2-build-order) |
 >
 > What remains here is the part *not* recorded elsewhere: what the original two-org build produced,
 > and what AAP was measured to isolate per organization.
@@ -76,7 +86,7 @@ A second, later finding in the same family: an organization created through the 
 never propagates to EDA, and EDA refuses to create one directly
 (`403 "Create should be done through the platform ingress"`). Organizations belong to the gateway.
 Their controller-side and EDA-side ids can also differ. See
-[README Part 8](../README.md#part-8--why-the-topology-is-this-way).
+[README Part 8](design-decisions.md).
 
 ---
 
