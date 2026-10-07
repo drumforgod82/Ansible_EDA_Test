@@ -327,6 +327,23 @@ this order**. Each one that looks right eliminates everything before it.
 4. **Automation Execution → Jobs.** The job appears, with `extra_vars` populated and an
    `ansible_eda` block recording the ruleset, the rule and the event UUID.
 
+![A successful Team A Incident Handler job, Status Success, with Extra variables showing the mapped fields and the ansible_eda block](images/95-aap-job-extra-vars.png)
+
+> ℹ️ **What to look for, top to bottom.** **Status: Success**; **Playbook**
+> `servicenow_incident_handler.yml` — not a rulebook; the team's ServiceNow credential attached. Then
+> in **Extra variables**: the fields the rulebook mapped, including `target_team: team-a` and
+> `source_stream: sn-team-a`, which together prove routing landed on the right team. Below them the
+> **`ansible_eda:`** block AAP adds by itself — `ruleset`, `rule`, the whole `event.payload`, and
+> `meta.source.type: eda.builtin.pg_listener`, which is your confirmation the activation is reading
+> the **event stream** rather than a webhook ([03 §2.12](03-aap-eda-setup.md)).
+>
+> 🔑 **Three values are masked in that capture** — the record `sys_id`, the stream UUID inside
+> `meta.endpoint`, and the event `uuid`. The stream UUID is credential-like, so mask it the same way
+> in any replacement capture ([images/README](images/README.md)).
+>
+> ⚠️ **Captured 2026-09-29, so individual values may predate the current payload contract** — read
+> [05 §7](05-servicenow-action.md) for what the keys should be today, not this screenshot.
+
 > 🔴 **Make sure your test record actually matches the trigger.** On the Incident flow the trigger
 > also requires the **Caller** to be `Event Management`, so an incident raised the ordinary way never
 > starts the flow — and there is no execution to inspect and no error anywhere. See

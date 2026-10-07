@@ -125,7 +125,7 @@ Copy these exactly. A typo in either **bold** name fails silently.
 | Git | Rulebook file | `rulebooks/team_c_rulebook.yml` |
 | AAP | Organization | `Team C` |
 | AAP | Inventory | `Team C Inventory` |
-| AAP | ServiceNow credential | `Team C ServiceNow PDI` |
+| AAP | ServiceNow credential | `ServiceNow PDI - Team C` |
 | AAP | Source control credential (Automation Execution) | `Team C Source control` — omit for a public fork |
 | AAP | Controller project | `EDA ServiceNow - Team C` |
 | AAP | Job template | **`Team C Incident Handler`** |
@@ -161,9 +161,9 @@ Copy these exactly. A typo in either **bold** name fails silently.
 > Seeing the underscored form in an error message does **not** mean you named it wrongly.
 
 > ℹ️ **The assignment group is *not* matched by name.** The route table's `assignment_group` column is
-> a **reference** holding the group's sys_id, so renaming the group later is safe. An older note in
-> `servicenow-dynamic-team-routing.md` §9 says the route row references the group by name — that is
-> wrong. What *does* break routing is deleting and recreating a group, which mints a new sys_id.
+> a **reference** holding the group's sys_id, so renaming the group later is safe. What *does* break
+> routing is deleting and recreating a group, which mints a new sys_id — the new one has a different
+> sys_id and the route row still points at the old one.
 
 ### 2.2 Phase 0 — the rulebook, first
 
@@ -323,10 +323,19 @@ findings and a human closes the record.
 > by string, so a rule referencing a template that does not exist yet fails at event time with
 > nothing useful in ServiceNow.
 
-> ⚠️ **Two known defects in that guide, pending a fix:** it states at line 16 that the route table is
-> "keyed on team code" — it is keyed on **assignment group** — and its Problem flow in §8.6 is built
-> **fail-open** while the same document mandates fail-closed for SCTASK at §6.2. Build the
-> fail-closed shape from [06 §2.2](06-servicenow-flow.md) for both.
+> ✅ **Reviewed in full and corrected 2026-10-07.** That guide was previously flagged here with two
+> defects. Only one was real:
+>
+> - **Real, now fixed:** it stated the route table is "keyed on team code". It is keyed on
+>   **assignment group**.
+> - **Not a defect — this flag was wrong:** its Problem flow in §8.6 was described here as
+>   **fail-open**. It is not. §8.6 builds `If Sys ID is empty → End Flow`, which is fail-*closed* —
+>   an unrouted problem exits before the action. The gate is silent rather than absent, which is a
+>   diagnosability gap and is now called out in §8.6 itself.
+>
+> Its substantive claims were verified against the live PDI and AAP: the `problem.state` read-only
+> evidence, every job template id, and the catalog item's sys_id and step-based fulfilment group all
+> check out exactly.
 
 ---
 
@@ -382,7 +391,7 @@ check fails. Checks span three layers:
 |---|---|
 | Repo | The rulebook exists and parses; **no other team's name is left in it**; the condition tests the right stream; `run_job_template.name` and `organization` are correct |
 | AAP | Organization, controller project and whether it synced, job template; **Playbook is `servicenow_incident_handler.yml`**; **Prompt on launch is on**; the stream exists, does **not** forward `Authorization`, and has forwarding on; the activation is running on the right rulebook |
-| ServiceNow | The assignment group exists and is active; the route row exists and is active; it names the right stream; it has a connection alias; the alias has a child connection |
+| ServiceNow | The assignment group exists and is active; the route row exists and is active; it names the right stream; it has a connection alias; the alias has a child connection; **exactly one active row is keyed on that group, and it is the row just checked** |
 
 > 🎯 **The check nothing else can do:** it compares the `event_stream_uuid` in the ServiceNow route
 > row against the **real UUID of the AAP stream**. Both sides look correct on their own screen and
@@ -397,9 +406,23 @@ differs, and `--json` for machine-readable output.
 > rulebook handles, and deliberately reports a team's intentional gaps as **skipped** rather than
 > failed — Team C has no SCTASK handler on purpose.
 
-> ⚠️ **Known limitation.** The script finds route rows by `team_code`, while the live routing key is
-> `assignment_group`. A row can therefore pass this check and still never match a record. Until that
-> is corrected, confirm the `assignment_group` value on each route row by eye.
+> ✅ **Fixed 2026-10-07.** The script finds a team's row by `team_code` — the only stable handle it
+> has — but that is **not** how routing works, so it now re-runs the flow's own query
+> (`assignment_group=<the group>^active=true`) and checks two more things:
+>
+> | Check | What it catches |
+> |---|---|
+> | *exactly one active route row keyed on group "Team-X"* | **Zero** rows: nothing assigned to that group can route, even though the `team_code` row looks perfect. **Two or more**: the flow returns only the first and which one is effectively arbitrary — the case [04 §4.1](04-servicenow-app.md) forbids and nothing previously tested |
+> | *the row routing actually selects is the row checked above* | A row exists for this `team_code` **and** a different row wins the real lookup, so every check above it describes a row the flow will never use |
+>
+> Both were proven with a negative control that stubs the ServiceNow client and asserts they stay
+> silent when the data is healthy and fire in each broken shape — including the subtle one where the
+> count is right but the winning row is the wrong one.
+>
+> ℹ️ **`provision_team.py` does not share this defect.** It writes both `team_code` and
+> `assignment_group`, and uses `team_code` only as a find-or-insert key, which is a legitimately
+> different question from routing. It *can* still create a second active row for a group another team
+> already serves — which is exactly what the first check above now catches.
 
 > 🔴 **A clean run does not mean the team works.** It means nothing is misconfigured in a way a
 > machine can see. The hand test in §2.6 is still required.

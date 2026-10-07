@@ -44,6 +44,16 @@ Save the **Client ID** and **Client Secret** immediately — the secret is shown
 
 Then enable **Settings → Platform Gateway → Allow External Users to Create OAuth2 Tokens**.
 
+> 🔴 **Use Authorization code, and do not reach for a password grant.** Resource Owner Password
+> Credentials (ROPC) looks simpler for a server-to-server call and is a **dead end here**: a
+> ServiceNow Connection & Credential Alias carries no username and password to send, so there is
+> nothing for that grant to use. Authorization code with ServiceNow's stock `OAuthUtil` is the
+> combination that works.
+
+> ⚠️ **`oauth_api_script` in the template below is a ServiceNow sys_id, not something you invent.**
+> It points at the out-of-box OAuth API script. It is reproduced verbatim from a working instance; if
+> your instance rejects it, look the script up by name rather than guessing at the value.
+
 ![OAuth application — authorization code, confidential](images/80-aap-oauth-application.png)
 
 _OAuth application — authorization code, confidential_
@@ -207,9 +217,10 @@ _Create New Connection & Credential → Create and Get OAuth Token_
 
 ## A.3 Create the REST Message
 
-> **Superseded.** The EDA flow does not use a REST Message at all — the Action's REST *step*
-> posts to the event stream using the Connection & Credential Alias from Part 3.1. This
-> section applies only to the direct-launch pattern.
+> **Superseded.** The EDA flow does not use a REST Message at all — the Action's REST *step* posts
+> to the event stream using the Connection & Credential Alias from
+> [04 §5](04-servicenow-app.md#5-create-one-credential-set-per-team). This section applies only to
+> the direct-launch pattern described here.
 
 All → System Web Services → Outbound → REST Message → New
 
@@ -224,10 +235,25 @@ HTTP method **POST**, endpoint copied from parent, header
 `Content-Type: application/json`.
 
 
-## A.4 Action script (Pattern B)
+## A.4 Action script
+
+> ℹ️ **"Pattern B" below means the direct-launch pattern — the one this appendix describes.** The
+> name is a leftover from documentation that no longer exists, where **Pattern A** was the
+> event-stream approach the numbered guides now build and **Pattern B** was this one. It is kept only
+> because the comment inside the script says it. There is nothing else to look up.
 
 <details>
 <summary>Single job template</summary>
+
+> 🔴 **This variant does not set `job_template_id`, so it cannot work against the A.3 endpoint as
+> written.** A.3's endpoint contains the REST Message variable
+> `${job_template_id}`, and only the multi-template variant below calls
+> `request.setStringParameterNoEscape('job_template_id', …)` to fill it. Leave it unset and the
+> request goes to a literal `${job_template_id}` in the path.
+>
+> **Pick one before using this block:** either hardcode the numeric id into the A.3 endpoint and
+> drop the variable, or add the `setStringParameterNoEscape` call with your id. Verified by reading
+> both blocks, 2026-10-07 — the defect is in this document, not in ServiceNow.
 
 ```javascript
 (function execute(inputs, outputs) {
@@ -255,7 +281,8 @@ HTTP method **POST**, endpoint copied from parent, header
     try {
         var request = new sn_ws.RESTMessageV2('Ansible AAP Job Template Webhook', 'Default POST');
 
-        // NOTE: Pattern B REQUIRES the extra_vars wrapper
+        // NOTE: the DIRECT-LAUNCH pattern REQUIRES the extra_vars wrapper.
+        // An event stream must NOT have it -- see docs/05-servicenow-action.md section 7.1.
         var payload = {
             extra_vars: {
                 incident_number:   incident.number.toString(),
@@ -411,3 +438,24 @@ an active flag. Replace `<your-scope>` with your real scope prefix.
 
 ---
 
+---
+
+## Self-check
+
+**Did I skip any prerequisite steps?** Deliberately, and it is flagged at the top rather than hidden:
+this document is **reference only**, and the two objects it launches against — job template
+`ServiceNow Incident Handler` and project `EDA ServiceNow` — were deleted on 2026-09-29. Following
+it end to end means rebuilding both first. That is stated before §A.1 so nobody discovers it at §A.3.
+
+**Is every command copy-paste ready with context?** The JSON templates are, with every
+instance-specific value as a `<placeholder>`. **The first JavaScript block is not**, and §A.4 now
+says so in a red callout: it omits the `setStringParameterNoEscape` call that fills the
+`${job_template_id}` variable in the §A.3 endpoint, so it needs one of two stated fixes before it
+will run. The second block is complete.
+
+**Would a complete novice understand every single sentence?** The one term this document used without
+defining was **"Pattern B"**, inherited from documentation that no longer exists; §A.4 now explains
+what it meant and that there is nothing else to look up. The `extra_vars` wrapper is the trap most
+likely to cost a reader real time — it is **required** here and **forbidden** on an event stream — so
+it appears three times: in the banner, in the §A.4 script comment, and cross-referenced to
+[05 §7.1](05-servicenow-action.md).

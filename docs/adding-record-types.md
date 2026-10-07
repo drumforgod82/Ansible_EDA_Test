@@ -4,8 +4,11 @@
 phases in order: each needs something the previous one made.
 
 This adds **catalog tasks (SCTASK)** and **problems** alongside incidents, for teams that already
-exist. It does not add a team — for that, see
-[§9 of the routing guide](servicenow-dynamic-team-routing.md#9-adding-a-team-worked-example-team-c).
+exist. It does not add a team — for that, see [08 §2 — Add a team](08-routine-ops.md#2-add-a-team).
+
+> **Previous reading:** [06 — The Flow](06-servicenow-flow.md) builds the incident flow this document
+> copies from, and its §3.2–§3.4 are the canonical treatment of the route gate. **Related:**
+> [Rulebook anatomy](rulebook-anatomy.md) for the rule you add in Phase 4.
 
 ---
 
@@ -13,7 +16,15 @@ exist. It does not add a team — for that, see
 
 **Nothing about routing changes.** An SCTASK assigned to `Team-A` resolves through the *same*
 `EDA Team Route` row as a Team-A incident — same stream, same alias, same UUID. The route table is
-keyed on team code, and the team has not changed. **No new route rows, no schema change.**
+keyed on **assignment group**, and the record's group has not changed. **No new route rows, no schema
+change.**
+
+> ⚠️ **Keyed on assignment group, not on team code.** `team_code` is the table's *display* column and
+> the value that rides in the payload as `target_team`; the column the lookup actually filters on is
+> `assignment_group`, a reference to `sys_user_group`
+> ([04 §4.1](04-servicenow-app.md#41-eda-team-route--which-stream-does-this-teams-work-go-to)). This
+> matters here because §7.0 is entirely about getting a catalog task onto the right **group** — if the
+> key were the team code, that whole phase would be unnecessary.
 
 | | Incidents (today) | SCTASK (new) | Problem (new) |
 |---|---|---|---|
@@ -52,7 +63,12 @@ you build.
 
 ### Decide two things
 
-1. **Items only, or also order guides?** Items only is the right default — see [1.3](#13-optional--also-enrol-by-order-guide). This instance has only two active guides, so the extra column earns nothing here.
+1. **Items only, or also order guides?** **This build does both**, and the `Order guide` column
+   exists on the live table with an active row using it — verified 2026-10-07. Items-only is the
+   simpler starting point and the single-condition gate in [6.2](#62-step-1--the-enrollment-gate) is
+   written for it, but if you are following this build rather than a minimal one, read
+   [1.3](#13-also-enrol-by-order-guide--built-here) **before** you build that gate, because it becomes
+   two condition sets.
 2. **One team first.** Build Team A end to end before creating Team B and C job templates. A broken pattern replicated three times is three times the unpicking.
 
 ### Take a baseline
@@ -115,6 +131,10 @@ On the table's **Columns** related list, add these three:
 | `Active` | **True/False** | default **true** | Lets you disable a row without deleting it |
 | `Description` | **String** | 200 | Free text — why this item is enrolled |
 
+> ℹ️ **Mark one column as the table's display column**, as [04 §4.2](04-servicenow-app.md) says —
+> otherwise anything referencing this table shows a raw 32-character `sys_id` instead of a name.
+> `Catalog item` is the sensible choice here.
+
 On the **Catalog item** column, open it and set **Reference qual → Advanced**, with:
 
 ```
@@ -126,14 +146,16 @@ sys_class_name!=sc_cat_item_guide
 > Hardware, Software and Record Producer items, which are also subclasses — you would silently be
 > unable to enrol most of the catalogue.
 
-### 1.3 Optional — also enrol by order guide
+### 1.3 Also enrol by order guide — built here
 
-**Skip this if you only ever enrol individual items.** The single `Catalog item` column above already
-covers every individual item, including Hardware, Software and Record Producer subclasses.
+**This column is built on this instance and is in use.** Verified 2026-10-07: the live table carries
+`order_guide` (Reference → `sc_cat_item_guide`) alongside `catalog_item`, with **two active rows** —
+one enrolling the item `James Test`, one enrolling the guide `James Test Order Guide`.
 
-Add this only if you want *"anything ordered through guide X is eligible"* as well. It is a second,
-independent way in — a task passes the gate if **either** its item is enrolled **or** its order guide
-is.
+**You can still skip it** on a minimal build: the `Catalog item` column alone covers every individual
+item, including Hardware, Software and Record Producer subclasses. Add the guide column when you want
+*"anything ordered through guide X is eligible"* as well. It is a second, independent way in — a task
+passes the gate if **either** its item is enrolled **or** its order guide is.
 
 Add one more column:
 
@@ -177,9 +199,10 @@ OR
 > matches two rows, and iterating would launch two AAP jobs for one task. `Count > 0` is
 > duplicate-proof.
 
-Your PDI has only two active order guides (`Request Developer Project Equipment`, `New Hire`), so this
-is low value here — but the mechanism is what a real catalogue needs, and one guide row beats
-maintaining a list of its members.
+This PDI has **three** active order guides, verified 2026-10-07: `Request Developer Project
+Equipment`, `New Hire`, and `James Test Order Guide` — the last being the one this build actually
+enrols. One guide row beats maintaining a list of its members, which is the whole argument for the
+mechanism on a real catalogue.
 
 > ⚠️ **Governance note if you do use guides:** guide membership is owned by the catalog team, so their
 > additions silently expand what your automation fires on. There is no technical control for that —
@@ -334,7 +357,8 @@ thing that sets it.
 > Read the header line it prints — `Record types in team_a_rulebook.yml: incident + sctask + problem`
 > — and confirm it lists the type you just added. **Do not look for a fixed check total:** the count
 > scales with how many record types the team handles, so it differs per team by design (Team A
-> scores 44, Team C 38 with one `SKIP`).
+> scores 46, Team C 40 with one `SKIP` — and those numbers move whenever a check is added, so treat
+> them as examples rather than targets).
 
 ---
 
@@ -452,12 +476,18 @@ authoritative filter. A narrow trigger that disagrees with the table is two sour
 | Table | `EDA Enabled Catalog Items` |
 | Conditions | `Catalog item` **is** `Trigger → Catalog Task Record → Item` **AND** `Active` **is** true |
 
-> ⚠️ **The single condition set above is not what was actually built.** If you enrol by order guide as
-> well — and §1.3 explains why you probably should — this becomes **two OR'd condition sets**, each
-> carrying its own `Active is true` *and* its own `is not empty` guard. Go back and read
-> [§1.3](#13-optional--also-enrol-by-order-guide) before you build this step; it is 250 lines earlier
-> and it is the thing a reader working from here will miss. Both branches of that gate are proven:
-> `James Test - VM Snapshot` is **not** individually enrolled, so only the order-guide row catches it.
+> 🔴 **The single condition set above is the minimal build. It is NOT what is live on this instance.**
+> This build enrols by order guide as well ([§1.3](#13-also-enrol-by-order-guide--built-here)), so its
+> gate is **two OR'd condition sets**, each carrying its own `Active is true` *and* its own
+> `is not empty` guard — the block at the end of §1.3 shows both. Build that version if you are
+> following this instance.
+>
+> **Both branches are proven, not assumed:** `James Test` is enrolled as an item, and
+> `James Test Order Guide` as a guide, so a task for `James Test - VM Snapshot` — which is **not**
+> individually enrolled — is caught only by the guide row.
+>
+> §1.3 is ~250 lines before this step, which is exactly why this warning repeats here rather than
+> trusting you to remember it.
 
 Then **Add Flow Logic → If**, with the condition:
 
@@ -836,6 +866,22 @@ This shape — a guard If containing only `End Flow`, with the real work left at
 deliberately flatter than wrapping steps 3 and 4 inside an `is not empty` If. Wrapping needs existing
 steps dragged into a branch, and half-dragging leaves a step outside the gate that still runs.
 
+> ✅ **That reasoning is now the documented retrofit for any flow**, not just Problem — see
+> [06 §3.4](06-servicenow-flow.md#34-retrofitting-the-gate-into-a-flow-you-have-already-built), which
+> arrived at the same conclusion independently and gives the step-by-step. The Incident flow was
+> retrofitted this way on 2026-10-07.
+
+> ⚠️ **This gate is fail-closed but *silent*, and [06 §3.3](06-servicenow-flow.md) asks for more.**
+> `End Flow` on its own means "unroutable" leaves no trace, which makes a misconfiguration look
+> identical to a record that was never in scope. The fix is cheap and does not change the shape:
+> **put an Update Record work note inside the `is empty` branch, before the `End Flow`**, naming the
+> missing route row.
+>
+> This build has not done that yet, and §8.7's Test 2 below still expects *no work notes at all* —
+> which is the honest description of what it does today, not a target to preserve. If you add the
+> note, Test 2's expectation becomes **one** work note naming the group. A Send Email alongside it is
+> deliberately deferred on this build ([06 §6](06-servicenow-flow.md)).
+
 Then map **four pills** into the action step:
 
 | Action input | Pill |
@@ -884,10 +930,15 @@ to a group with no route row.
 
 | Expect | |
 |---|---|
-| Work notes | **none at all** |
+| Work notes | **none at all** — *as built today.* **One**, naming the missing route row, once you add the note from §8.6 |
 | Counters | all three unchanged |
 | Jobs | none |
 | Flow | runs to `Complete`, having exited at the gate |
+
+> ⚠️ **"No work notes" is why this test is weak on its own.** A gate that works and a flow that never
+> triggered produce the identical result — nothing. So the row that actually carries the proof is
+> **Flow: runs to `Complete`**: open Executions and confirm a run exists and stopped at step 2. If
+> there is no execution at all, your trigger did not fire and this test proved nothing about the gate.
 
 > 🔴 **Run test 1 again after any gate change.** It is easy to build a gate that blocks
 > *everything*, and from test 2 alone that is indistinguishable from a gate that works.
@@ -945,6 +996,43 @@ rule, **create job template `Team C SCTASK Handler` first.**
 | `target_team` empty | The action's `team_code` input is declared but its pill was never mapped |
 | `No <record> supplied. Step inputs present: team_code=empty, <record>=empty` | **Both empty means the *flow* layer**, not the action. `team_code` is never dot-walked, so if it is empty too, the flow is not feeding the action's inputs at all. Fix the flow's four pills first — see §8.6 |
 | `Problem not found: PRB00400NN` | A record pill dot-walked to `➛ Number`. Step 1's input is typed String so it accepts the number happily, then `GlideRecord.get()` reads it as a sys_id. Map the pill **bare** |
-| `Request not sent and the REST step reported no error.` | The REST step never left the instance — an **empty connection alias**, which on Problem means the route gate is missing and an unrouted record reached the action. See §8.5 |
+| `Request not sent and the REST step reported no error.` | The REST step never left the instance — an **empty connection alias**, which on Problem means an unrouted record reached the action. Either the route gate is missing, or its condition is on the **Record pill** instead of `Sys ID`, which never fires. See [§8.6](#86-the-flow-servicenow) and [06 §3.2](06-servicenow-flow.md#32-the-sys-id-gate) |
 | A work note fires but the record's fields never change | Read-only field. HTTP 200 with **no `sys_audit` row** for that field means the Table API discarded it — check `sys_dictionary` *and* `sys_dictionary_override`. Not a permission fault, not the state model. See §8.1 |
 | Ten payload keys are always empty | Ported a script from another instance whose `u_*` fields do not exist here. `getFieldValue(undefined)` returns `''` instead of throwing |
+
+---
+
+## Self-check
+
+**On length.** This file is about 1,000 lines, past the point where a build guide should be split by
+stage. It is deliberately not split, because the phases are **not independent**: Phase 7 debugs what
+Phase 1 built, §8.6 is only legible next to §6.2–§6.3, and the final table routes back into six
+separate phases. Splitting it would multiply cross-document links without reducing what anyone has to
+read — you read the phase you are on. The entry points that make that workable are the table at the
+top, which says what is new per record type, and the symptom table at the bottom.
+
+**Did I skip any prerequisite steps?** No, and two ordering hazards are stated where they bite rather
+than in passing: every job template must exist **before** any project sync (§8.3), because a rule
+naming a missing template fails silently from the ServiceNow side; and §1.3's order-guide column
+changes the §6.2 gate from one condition set to two, which is why §6.2 repeats that warning instead of
+trusting you to remember 250 lines back.
+
+**Is every command copy-paste ready with context?** The shell commands here are the YAML parse check
+in Phase 2, the baseline and final `verify_team.py` runs, and the `shasum` hash comparison in §8.4 —
+each states what success looks like, including that silence is the pass for the YAML check. The
+JavaScript in §5.3 is an excerpt shown to explain `sc_item_option_mtom`, not something to paste
+whole; the canonical scripts live in [`docs/scripts/`](scripts/).
+
+**Would a complete novice understand every single sentence?** The two hardest ideas are front-loaded.
+§8.1 explains that `problem.state` is read-only to the Table API **before** Phase 8 asks you to build
+anything, because it changes what the phase is for. §7.0 explains that a catalog task's assignment
+group comes from fulfilment configuration rather than from you, which is the single most surprising
+thing here and the one that silently wastes the most time.
+
+**Verified against the live instances, 2026-10-07.** `problem.state`'s `read_only`,
+`read_only_override` and `read_only_option` values; `task.state` being writable while
+`problem.resolution_code`, `resolved_at` and `resolved_by` are not; every job template id in §9;
+`James Test`'s sys_id, its `sc_cat_item` class and its **empty** `group` field; the `Assign to Team A`
+fulfilment step's assigned group; and the enrollment table's `order_guide` column with its two active
+rows. The one claim that was wrong — the route table being "keyed on team code" — is corrected at the
+top.

@@ -159,9 +159,12 @@ Two Python tools in [`scripts/`](scripts/), standard library only. Both take `--
 > silent failure modes *by construction*, which is exactly why a successful scripted run teaches you
 > nothing about them — and those four are what you will be debugging later.
 
-> ⚠️ **Known limitation.** `verify_team.py` looks up route rows by `team_code`, while the live routing
-> key is `assignment_group`. A row can pass verification and still never match a record. Confirm the
-> assignment group by eye until this is corrected.
+> ✅ **Fixed 2026-10-07 — the routing-key gap is closed.** `verify_team.py` still *finds* a team's row
+> by `team_code`, which is the only stable handle it has, but it now also **re-runs the query the flow
+> actually uses** — `assignment_group` plus `active=true` — and asserts two things: that **exactly one**
+> active row is keyed on that group, and that it is **the same row** the rest of the checks examined.
+> So a row that looks healthy while the flow routes elsewhere now FAILs. Verified with a four-scenario
+> negative control; Team A scores 46, Team C 40 plus one skip.
 
 ---
 
@@ -173,7 +176,7 @@ Two Python tools in [`scripts/`](scripts/), standard library only. Both take `--
 │   ├── team_a_rulebook.yml          #   incident + sctask + problem
 │   ├── team_b_rulebook.yml          #   incident + sctask + problem
 │   ├── team_c_rulebook.yml          #   incident + problem (no SCTASK — deliberate)
-│   ├── my_eda_rulebook.yml          # 🔴 teaching example. Attach to NOTHING
+│   ├── my_eda_rulebook.yml          # 🔴 single-rulebook REFERENCE shape. Inert; attach to NOTHING
 │   └── catchall_debug_rulebook.yml  # 🔴 matches EVERY event. Attach to NOTHING
 ├── collections/
 │   └── requirements.yml             # servicenow.itsm — installed at project sync
@@ -201,11 +204,13 @@ Two Python tools in [`scripts/`](scripts/), standard library only. Both take `--
 └── README.md                        # this map
 ```
 
-> 🔴 **Two rulebooks are inert on purpose and must stay unattached.** `my_eda_rulebook.yml` cannot
-> fire — its condition tests a retired `event_type`. `catchall_debug_rulebook.yml` matches
-> **everything**, so attaching it to an activation that shares a stream double-launches every job,
-> producing a symptom that looks like a completely different fault. Details:
-> [Rulebook anatomy §5](docs/rulebook-anatomy.md#5--two-rulebooks-in-this-repo-are-dangerous--leave-them-alone).
+> 🔴 **Two rulebooks must stay unattached, both kept on purpose.**
+> `catchall_debug_rulebook.yml` matches **everything** by design, so attaching it to an activation
+> that shares a stream double-launches every job — a symptom that looks like a completely different
+> fault. It is kept because [Experiment 4](docs/design-decisions.md) needs it.
+> `my_eda_rulebook.yml` is the **single-rulebook reference shape**, for anyone who would rather run
+> one rulebook than one per team; it is inert as shipped and its header lists what to change. Details:
+> [Rulebook anatomy §5](docs/rulebook-anatomy.md#5--two-rulebooks-in-this-repo-must-not-be-attached--leave-them-alone).
 
 > ⚠️ **Rulebooks must live in `rulebooks/` or `extensions/eda/rulebooks/` at the repository root.**
 > The search is **not** recursive — a rulebook anywhere else is invisible to AAP.
@@ -215,10 +220,13 @@ Two Python tools in [`scripts/`](scripts/), standard library only. Both take `--
 Still present, pending removal. They contain accurate material but also known errors, and the
 numbered guides supersede them:
 
-| File | Superseded by | Known issues |
+**Removed 2026-10-07.** Both superseded documents have been deleted now that their unique content is
+migrated; they remain in git history.
+
+| File | Replaced by | What was carried across before deleting |
 |---|---|---|
-| `docs/servicenow-dynamic-team-routing.md` | `04`, `06`, `design-decisions.md` | States the route table is keyed on `team_code` — it is keyed on **assignment group**. Presents the Decision Table as a live option; it was **rejected** |
-| `docs/phase2b-two-org-runbook.md` | `03`, `design-decisions.md` | References a "Team D" that does not exist, and an activation log string that has since been renamed |
+| `docs/servicenow-dynamic-team-routing.md` (1,705 lines) | `04`, `06`, `08 §2`, `design-decisions.md`, `docs/scripts/` | The `For Each` Array-pill grey-out diagnostic → [06 §3.1](docs/06-servicenow-flow.md); the extra-match-column option and its `Order by` wildcard trap, the rulebook-dispatch example, and the decision-table API findings → [design decisions §3.4–§3.5](docs/design-decisions.md) |
+| `docs/phase2b-two-org-runbook.md` | `03`, `design-decisions.md` | Nothing unique — it referenced a "Team D" that does not exist and an activation log string since renamed |
 
 > ℹ️ **`aap-eda-project-sync-fix.md` was on this list and is no longer.** It is now
 > [`docs/aap-platform-troubleshooting.md`](docs/aap-platform-troubleshooting.md) — renamed because it

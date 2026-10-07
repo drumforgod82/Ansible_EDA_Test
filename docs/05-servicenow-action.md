@@ -128,6 +128,25 @@ For the other two record types, the equivalents are in
 [`docs/scripts/README.md` §3](scripts/README.md) — it lists every declared input and output name per
 step, which is the detail this layer gets wrong most often.
 
+![Step 1 Build EDA Payload: the two declared input variables, the script's case-handling comment, and the four declared outputs](images/73-sn-step1-input-vars.png)
+
+> ℹ️ **What to look for:** the **Input Variables** grid declares `Incident_record` and `team_code`
+> — two rows, each with a pill in its Value column, which is the two-layer wiring from §0 made
+> visible. The **Output Variables** grid below declares `error_message`, `payload`, `is_valid` and
+> `incident_number`, all String. The script itself carries the case-sensitivity comment and the
+> `inputs.incident_record || inputs.Incident_record` line that tolerates either spelling.
+
+> 🔴 **One thing in that capture contradicts [§3.2](#32-map-the-record-pill--bare) — check your own
+> instance.** The `Incident_record` row's pill reads `action ▸ … ▸ Number`, which looks like a
+> dot-walk to Number, the exact mapping §3.2 tells you not to make. It matters because the script
+> falls back to `String(record)` when the input is not an object, so a number would be used as a
+> sys_id.
+>
+> **Do not conclude from this image that the live action is broken.** A collapsed pill is not proof
+> of what it points at — the same lesson as [06 §3.2](06-servicenow-flow.md#32-the-sys-id-gate) — the
+> `…` hides segments, and the incident pipeline demonstrably resolves real sys_ids today
+> ([07 §4](07-end-to-end-test.md)). **Open step 1 and expand that pill** to see which it is.
+
 ![Script step output variables, which must be declared](images/51-sn-script-step-outputs.png)
 
 ### 3.2 Map the record pill — bare
@@ -159,7 +178,8 @@ Drag the record pill itself into the input. **Do not dot-walk it to `➛ Number`
 Paste the **whole file**, including the `(function execute(inputs, outputs) {` wrapper and the
 `})(inputs, outputs);` at the end.
 
-> ⚠️ **Do not use the inline script in the old `README.md` Part 3.2.** It is superseded. It emits the
+> ⚠️ **Do not use the inline payload script from the pre-2026-10 documentation.** It is superseded
+> and no longer in the repository — but you may have a copy. It emits the
 > flat `event_type` value `incident_created`, while every live rulebook matches
 > `servicenow.incident.created` — so an action built from it can never fire any rule. It also omits
 > the `team_code` input and declares a `success` output the real script does not have.
@@ -237,6 +257,16 @@ the UUID would tie this action to one team.
 
 **Four outputs:** `success`, `http_status`, `response_body`, `error_message`.
 
+![Step 3 Process Response: three lowercase input variables mapped from the POST step's outputs, and the four declared outputs](images/74-sn-step3-input-vars.png)
+
+> ℹ️ **What to look for — this image is the §0 two-layer idea at its clearest.** On the left the step
+> declares `rest_error_message`, `status_code` and `response_body`, all **lowercase**. On the right
+> the POST step publishes `Error Message`, `Status Code` and `Response Body`, **title case**. The
+> three arrows are the mapping that crosses that boundary. The names on the two sides do *not* match
+> and do not need to — what must match is each declared name and what the **script** reads, which is
+> why §5.2's CamelCase warning exists. The Output Variables grid below shows the four outputs, with
+> `success` as the only True/False.
+
 > ⚠️ **No `payload` output on this step.** The action's `payload` output must come from **step 1**,
 > which is the only step that assigns it.
 
@@ -288,13 +318,13 @@ before the playbook ever sees the payload. The scripts set them; you do not type
 | `source` | a scoped system property, falling back to the instance name — see below | Distinguishes a dev-origin send from a production one |
 | `target_team` | the `team_code` input, e.g. `team-a` | Tells apart two teams' events on a stream they share |
 
-> 🔴 **All four are required.** An older note in `README.md` Part 4 exempts "the single-team
+> 🔴 **All four are required.** An older note in the pre-2026-10 documentation exempted "the single-team
 > reference script" from sending all four. **That exemption no longer applies** — it expires as soon
 > as a second activation is attached to a stream, and this build has three teams with three
 > activations.
 
 > ⚠️ **`event_version` is a string, not an integer.** All three canonical scripts set
-> `var EVENT_VERSION = '1.0';`. The old README described it as "Integer, currently always `1`", which
+> `var EVENT_VERSION = '1.0';`. The older documentation described it as "Integer, currently always `1`", which
 > is wrong. The rulebooks pass it through with `| default('')`, so they do not care about the type —
 > but do not "correct" the script to match the old prose.
 
@@ -439,7 +469,7 @@ Two steps, both required:
 > Expected output: `pdi`. If it prints `NOT SET`, the property name is wrong — most likely it has a
 > doubled scope prefix.
 
-> ⚠️ **The old `README.md` Part 4 shows `payload.source = 'pdi';` as a hardcoded assignment.** That
+> ⚠️ **The pre-2026-10 documentation showed `payload.source = 'pdi';` as a hardcoded assignment.** That
 > is not what the live scripts do, and the property it actually reads is not mentioned there at all.
 
 ### 7.4 Why the stream name is the stronger check

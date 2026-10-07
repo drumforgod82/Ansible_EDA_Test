@@ -181,9 +181,10 @@ All three are **Created** only (not on update) and run in the **background**.
 > trigger rather than leaving the condition pointing at nothing — a trigger condition naming a
 > non-existent user never matches, and the flow silently never runs.
 >
-> If you have read the older `README.md` §3.3 and `servicenow-dynamic-team-routing.md` §5.9 and
-> thought they contradicted each other on the trigger — they did not. One described the Incident
-> flow, the other described SCTASK and Problem. Neither said which.
+> If you read the pre-2026-10 documentation and thought two sections contradicted each other on the
+> trigger — they did not. One described the Incident flow, which **does** require
+> `Caller is Event Management`; the other described SCTASK and Problem, which do not. Neither said
+> which it meant.
 
 > ⚠️ **Keep the trigger condition coarse.** It only has to be a *superset* of what you want. The
 > enrollment gate in §2 is the authoritative filter. A narrow trigger that disagrees with the
@@ -288,6 +289,17 @@ follow.
 | If multiple records are found | `Return only the first record` |
 | **Don't fail on error** | ✅ **checked** |
 
+![The Look Up Record step expanded: table EDA Team Route, the assignment-group and Active conditions, Return only the first record, and Don't fail on error ticked](images/75-sn-lookup-record-step.png)
+
+> ℹ️ **What to look for:** every field from the table above, in one view — **Action** reads
+> *Look Up Record* (singular), **Table** is `EDA Team Route`, the two conditions are
+> `Assignment group is <trigger pill>` and `Active is true`, *If multiple records are found* is
+> **Return only the first record**, and **Don't fail on error** is **ticked**. The arrow traces the
+> condition's pill back to `Trigger ▸ Incident Record ▸ Assignment group` in the Data panel.
+>
+> ⚠️ Its ACTIONS list predates the route gate — step 1 goes straight to step 2 *Send*. Use the
+> expanded panel, not the step list; see [§1.2](#12-the-trigger).
+
 > ℹ️ **Singular here, plural in §2.1 — and the difference is deliberate.**
 >
 > | Action | Output pill | Type | Loop needed? |
@@ -297,6 +309,16 @@ follow.
 >
 > One assignment group maps to one active route row, so there is nothing to iterate. Enrollment can
 > legitimately match more than one row, which is why that one is plural and gated on `Count`.
+
+> ℹ️ **If the entire pill picker greys out when you add a `For Each Item` loop, that is the type
+> system telling you something, not a bug.** `For Each`'s **Items** field is typed **Array**, and the
+> picker disables every pill whose type is not an Array. The singular `Look Up Record` outputs
+> Record / Table / Choice / String — no Array among them — so nothing is clickable.
+>
+> It is not a permissions problem and not a UI fault: it means the loop does not belong in this flow.
+> A `For Each` over route rows only makes sense if you deliberately switch step 1 to the **plural**
+> `Look Up Records` because one record must reach **several** streams — and that is a fan-out design
+> this build does not use ([design decisions §3.5](design-decisions.md#35-if-you-ever-need-to-route-on-more-than-the-assignment-group)).
 
 ### 3.2 The `Sys ID` gate
 
