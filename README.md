@@ -103,23 +103,24 @@ unrouted record cannot reach the action. None of this was ever a security issue:
 alias means the request never leaves ServiceNow ([10 §3.4](docs/10-troubleshooting.md)). What remains
 costs diagnosability.
 
-| Flow | Route gate | Remaining gaps |
-|---|---|---|
-| `…on SCTASK` | ✅ `sys_id is not empty`, nested inside the `Count > 0` branch — **the reference implementation** | Updated 2026-10-07; this row is pending a re-check of what changed |
-| `…on Incident-EDA` | ✅ Added 2026-10-07 as `is empty → End Flow`, **condition verified to be on `Sys ID`** | Exit is silent |
-| `…on Problem` | ✅ `sys_id is empty → End Flow` | Exit is silent |
+All three flows are **fail-closed** — an unrouted record cannot reach the action — and all three
+exit **silently**, which is a recorded decision rather than a gap:
 
-**The silent exit is the one thing left.** `End Flow` with nothing before it is fail-closed but
-leaves "enrolled but unroutable" indistinguishable from "not enrolled", which
-[06 §0](docs/06-servicenow-flow.md) warns against. The fix is the same in all three: add an Update
-Record work note **inside** the `is empty` branch, before the `End Flow` —
-[06 §3.4](docs/06-servicenow-flow.md#34-retrofitting-the-gate-into-a-flow-you-have-already-built).
+| Flow | Route gate | Error handler | Success/failure split |
+|---|---|---|---|
+| `…on SCTASK` | ✅ `sys_id is not empty`, nested in the `Count > 0` branch | ✅ enabled 2026-10-07 | ✅ added 2026-10-07 |
+| `…on Incident-EDA` | ✅ `is empty → End Flow`, condition verified on `Sys ID` | ✅ | ✅ |
+| `…on Problem` | ✅ `sys_id is empty → End Flow` | ✅ | ✅ |
 
-> ℹ️ **The Send Email half is deliberately deferred** (decided 2026-10-07), so it is a recorded
-> choice rather than an outstanding defect. [06 §3.3](docs/06-servicenow-flow.md) and
-> [06 §6](docs/06-servicenow-flow.md) still prescribe it, because on a shared instance somebody has
-> to be told. On a single-owner lab the **work note carries most of the value** — it puts the real
-> reason on the record you are already looking at — and it is the cheaper half to add.
+> ⚠️ **The silent exit is deliberate on Incident and Problem** (decided 2026-10-07), and the reason
+> generalises: those flows have **no enrollment gate**, so the route gate is the first filter behind
+> a coarse trigger. On a shared instance most records reaching it belong to teams that never asked
+> for EDA, so a per-record work note would be **noise on other teams' tickets** — paid for by people
+> who get no benefit. Diagnose from the flow's **Executions** list instead.
+>
+> **SCTASK is the case where noise is correct**, because enrollment already established the task is
+> in scope — so "enrolled but unroutable" really is a misconfiguration. Reasoning and the narrower
+> alternatives: [06 §3.3](docs/06-servicenow-flow.md). **Send Email is deferred on all three.**
 
 ---
 

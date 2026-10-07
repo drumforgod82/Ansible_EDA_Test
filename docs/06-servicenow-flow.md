@@ -38,9 +38,19 @@ failure behaviour:
 | **Is this record in scope for EDA at all?** | `EDA Enabled Catalog Items` lookup — **SCTASK only** | **Normal.** Exit quietly — most catalog tasks are not EDA tasks |
 | **Which team's stream does it go to?** | `EDA Team Route` lookup — **every record type** | **A misconfiguration.** Say so loudly |
 
-> 🔴 **Those two cases must not share an exit.** If "not enrolled" and "enrolled but unroutable" both
-> end the flow silently, a misconfiguration looks exactly like an ordinary Tuesday — and you find out
-> when somebody asks why their request never ran.
+> 🔴 **Those two cases must not share an exit — *when reaching the route gate means the record was
+> supposed to route*.** That condition is the whole rule, and it is not always true:
+>
+> | Record type | Does reaching the route gate imply it should route? | So an unroutable record is… |
+> |---|---|---|
+> | **SCTASK** | **Yes** — the enrollment gate already said this task is in scope | a **misconfiguration**. Be noisy |
+> | **Incident / Problem** | **No** — the trigger is the only upstream filter, and it is deliberately coarse | often **normal**. Noise here lands on other teams' records |
+>
+> For SCTASK, "enrolled but unroutable" should never happen and silence hides it. For Incident and
+> Problem on a shared instance, *most* records reaching the gate legitimately belong to teams that
+> never asked for EDA — so a work note on each one is unsolicited noise on someone else's ticket.
+> **This build therefore exits silently on all three** (decided 2026-10-07) and diagnoses from the
+> flow's **Executions** list instead. See [§3.3](#33-the-else-branch--this-is-the-one-the-old-docs-omitted).
 
 ### 🔴 Only SCTASK has an enrollment gate — read this before building
 
@@ -382,10 +392,21 @@ Add an **Else** to the §3.2 If, and inside it:
 > instance, or anywhere the record's assignee is not the integration's owner, you need both: a work
 > note nobody reads is not an alert.
 
-> 🔴 **Do not reuse the quiet exit from §2.2 for this case.** "Not enrolled" is normal and should be
-> silent. "Enrolled but unroutable" should never happen and must be noisy. They produce the same
-> symptom — nothing runs — and only one of them is an error. If they share an exit you cannot tell
-> them apart without reading Executions by hand.
+> 🔴 **For SCTASK, do not reuse the quiet exit from §2.2.** "Not enrolled" is normal and should be
+> silent. "**Enrolled** but unroutable" should never happen and must be noisy. They produce the same
+> symptom — nothing runs — and only one is an error, so sharing an exit means you cannot tell them
+> apart without reading Executions by hand.
+>
+> ⚠️ **For Incident and Problem the calculus is different, and this build deliberately stays silent**
+> (decided 2026-10-07). Those flows have no enrollment gate, so the route gate is the **first**
+> filter, and on a shared instance most records reaching it belong to teams that never asked for EDA.
+> A work note on each would be **noise on other teams' records** — a cost paid by people who get no
+> benefit from it. Diagnose from the flow's **Executions** list instead: a run that exists and stops
+> at the gate is the signal, and it costs other teams nothing.
+>
+> **If you do want an alert on Incident or Problem, narrow it rather than writing to every record** —
+> for example notify only when the group is one you expected to be onboarded, or log to a table
+> instead of the ticket. The thing to avoid is a per-record work note behind a coarse trigger.
 
 > ⚠️ **An `If … is empty → End Flow` gate is not the same thing, and the live Problem flow uses it.**
 > Gating on *empty* and exiting is **fail-closed** — the action never runs on an unrouted record, which
@@ -406,10 +427,12 @@ than wrapping the existing steps, and it is the shape the live Incident and Prob
    inverse of §3.2, and the **`Sys ID`** scalar rather than the Record pill. Expand the `If`
    afterwards and confirm Condition 1 really names `Sys ID`; the collapsed label alone does not prove
    it ([§3.2](#32-the-sys-id-gate)).
-3. **Put `End Flow` inside that true branch**, and inside it — before the `End Flow` — the Update
-   Record work note and the Send Email from
-   [§3.3](#33-the-else-branch--this-is-the-one-the-old-docs-omitted). Without those two the exit is
-   silent, which is fail-closed but undiagnosable.
+3. **Put `End Flow` inside that true branch.** Whether you also put an Update Record work note in
+   there, before the `End Flow`, depends on the record type —
+   [§3.3](#33-the-else-branch--this-is-the-one-the-old-docs-omitted). **SCTASK: yes.** **Incident and
+   Problem behind a coarse trigger: deliberately not**, because the note would land on records
+   belonging to teams that never asked for EDA. A silent exit is still fail-closed; you diagnose from
+   Executions.
 4. **Leave every existing step exactly where it is.** Because `End Flow` terminates the run, anything
    below the `If` only executes when a route row *was* found — so the action does not need to move
    into a branch at all. **This is the whole reason to prefer this shape for a retrofit:** no

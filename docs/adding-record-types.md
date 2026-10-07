@@ -871,16 +871,17 @@ steps dragged into a branch, and half-dragging leaves a step outside the gate th
 > arrived at the same conclusion independently and gives the step-by-step. The Incident flow was
 > retrofitted this way on 2026-10-07.
 
-> ⚠️ **This gate is fail-closed but *silent*, and [06 §3.3](06-servicenow-flow.md) asks for more.**
-> `End Flow` on its own means "unroutable" leaves no trace, which makes a misconfiguration look
-> identical to a record that was never in scope. The fix is cheap and does not change the shape:
-> **put an Update Record work note inside the `is empty` branch, before the `End Flow`**, naming the
-> missing route row.
+> ℹ️ **This gate is fail-closed and *silent*, and on Problem the silence is deliberate** (decided
+> 2026-10-07). Problem has no enrollment gate, so this gate is the first filter behind a coarse
+> trigger — most problems reaching it belong to groups that were never onboarded, and a work note on
+> each would be noise on other teams' records. Diagnose from the flow's **Executions** list, where a
+> run that stops at step 2 is the signal.
 >
-> This build has not done that yet, and §8.7's Test 2 below still expects *no work notes at all* —
-> which is the honest description of what it does today, not a target to preserve. If you add the
-> note, Test 2's expectation becomes **one** work note naming the group. A Send Email alongside it is
-> deliberately deferred on this build ([06 §6](06-servicenow-flow.md)).
+> **Contrast SCTASK**, where [§6.3](#63-step-2--the-route-lookup)'s gate sits *behind* the enrollment
+> gate: there, "enrolled but unroutable" is a genuine misconfiguration and
+> [06 §3.3](06-servicenow-flow.md) asks you to be noisy about it. The rule depends on whether
+> reaching the gate implies the record was supposed to route. §8.7's Test 2 expectation of *no work
+> notes* is therefore correct for Problem, not a shortfall.
 
 Then map **four pills** into the action step:
 
@@ -930,7 +931,7 @@ to a group with no route row.
 
 | Expect | |
 |---|---|
-| Work notes | **none at all** — *as built today.* **One**, naming the missing route row, once you add the note from §8.6 |
+| Work notes | **none at all** — and that is the intended behaviour for Problem, not a shortfall ([§8.6](#86-the-flow-servicenow)) |
 | Counters | all three unchanged |
 | Jobs | none |
 | Flow | runs to `Complete`, having exited at the gate |
