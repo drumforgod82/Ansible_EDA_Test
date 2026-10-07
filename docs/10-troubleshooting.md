@@ -104,6 +104,28 @@ first-time builder usually hits:
 > "matching your trigger", but a trigger condition set weeks earlier is invisible from the record
 > form. When in doubt, temporarily widen the trigger, confirm the flow fires, then narrow it again.
 
+> ✅ **Telling a real run from a Test run — `source_record` is the giveaway.** A run started with
+> Flow Designer's **Test** button looks like a successful execution and writes the same work notes,
+> but it proves nothing about your trigger. The two are distinguishable in `sys_flow_context`:
+>
+> ```bash
+> read -rsp "ServiceNow password: " SNPW; echo
+> curl -sk -u "<your-sn-user>:$SNPW" \
+>   "https://<your-pdi>.service-now.com/api/now/table/sys_flow_context?sysparm_query=nameLIKETrigger%20EDA^ORDERBYDESCsys_created_on&sysparm_fields=sys_created_on,name,source_record,state&sysparm_limit=8&sysparm_display_value=all" \
+>   | python3 -m json.tool
+> ```
+>
+> Expected output — a **populated** `source_record` such as `Problem: PRB0040008` means the record's
+> trigger fired. An **empty** `source_record` means it was a **Test** run: the Record Created trigger
+> binds the context to the record, and the Test dialog does not.
+>
+> **This matters when you are verifying a build**, because a Test run can make a broken trigger look
+> fine. Measured on this instance 2026-10-07: two Incident runs with an empty `source_record` (Tests)
+> alongside six older Problem runs that each name their record.
+>
+> It also explains a confusing artefact — a record **created weeks ago** gaining a fresh EDA work
+> note today, even though the trigger is Created-only. That is a Test run, not the trigger re-firing.
+
 > ℹ️ **Why this bites beginners specifically.** The build docs tell you to create a record "matching
 > your trigger", but a trigger condition set weeks earlier is invisible from the record form. When in
 > doubt, temporarily widen the trigger, confirm the flow fires, then narrow it again.

@@ -136,16 +136,36 @@ step, which is the detail this layer gets wrong most often.
 > `incident_number`, all String. The script itself carries the case-sensitivity comment and the
 > `inputs.incident_record || inputs.Incident_record` line that tolerates either spelling.
 
-> 🔴 **One thing in that capture contradicts [§3.2](#32-map-the-record-pill--bare) — check your own
-> instance.** The `Incident_record` row's pill reads `action ▸ … ▸ Number`, which looks like a
-> dot-walk to Number, the exact mapping §3.2 tells you not to make. It matters because the script
-> falls back to `String(record)` when the input is not an object, so a number would be used as a
-> sys_id.
+> ✅ **FIXED 2026-10-07 — but the capture still shows the old state, so read the pill in your own
+> instance, not in this image.** The `Incident_record` row here reads `action ▸ … ▸ Number`, a
+> dot-walk to Number, which [§3.2](#32-map-the-record-pill--bare) tells you not to make. It was
+> confirmed in the UI and then **removed**; the pill is now mapped bare.
 >
-> **Do not conclude from this image that the live action is broken.** A collapsed pill is not proof
-> of what it points at — the same lesson as [06 §3.2](06-servicenow-flow.md#32-the-sys-id-gate) — the
-> `…` hides segments, and the incident pipeline demonstrably resolves real sys_ids today
-> ([07 §4](07-end-to-end-test.md)). **Open step 1 and expand that pill** to see which it is.
+> **It had been latent rather than breaking**, which is why it survived unnoticed. The step input is
+> typed **String**, so a dot-walk to Number is type-compatible and ServiceNow accepts it silently.
+> The script then takes `inputs.incident_record || inputs.Incident_record`, and the likeliest reason
+> it kept working is that the **lowercase action input won that `||`** and supplied a real
+> GlideRecord, so the mis-mapped value was never read. Inferred from behaviour, not proven.
+>
+> 🔴 **Why it mattered anyway: a bad pill propagates on copy.** That `||` was load-bearing and the
+> mapping is invisible from the step list. [adding-record-types §5.1](adding-record-types.md) tells
+> you to add record types by **copying this action**, so a copy inherits the dot-walk — the most
+> plausible origin of the `Problem not found: PRB0040012` failure in
+> [§8.6 there](adding-record-types.md#86-the-flow-servicenow), where the same fallback did *not*
+> save it.
+>
+> ✅ **Verified end to end after the change, 2026-10-07.** A newly created incident — `INC0010024`,
+> Caller `Event Management`, group `Team-A` — produced a flow execution whose `source_record` names
+> the incident (a real trigger, not a Test), `HTTP Status: 200`, `sn-team-a` incrementing **while
+> `sn-team-b` and `sn-team-c` did not**, job `Team A Incident Handler` **successful**, a playbook
+> write-back and the incident **Closed**. Removing the dot-walk broke nothing — and because the job
+> closed the *correct* record, step 1 was resolving a real sys_id, which it could only do from the
+> bare reference.
+>
+> **After changing any record pill, run that same test rather than trusting a green publish.** A
+> Flow Designer **Test** run exercises the action and proves step 1 resolves the record, but it does
+> **not** prove the trigger; [10 §2.1](10-troubleshooting.md#21-no-flow-execution-at-all) shows how
+> to tell the two apart from `source_record`.
 
 ![Script step output variables, which must be declared](images/51-sn-script-step-outputs.png)
 
