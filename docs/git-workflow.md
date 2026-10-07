@@ -123,7 +123,7 @@ Three real exits:
 
 | Option | What to do | Trade-off |
 |---|---|---|
-| **1. Merge commits instead of squash** — keeps `dev` | **Two steps, and the order matters — see the warning below.** ① Settings → Rules → Rulesets (or Settings → Branches for classic protection): untick **Require linear history** on `main`. ② Settings → General → Pull Requests: tick *Allow merge commits*, untick *Allow squash merging* **and** *Allow rebase merging* | Every merge gives `main` a commit whose parent is `dev`'s tip, so `main` is permanently an ancestor. **No divergence, no habit, nothing to remember.** Cost: `main`'s history shows every `dev` commit — for a single-developer repo that is arguably better, since you keep the real history instead of flattening it |
+| **1. Merge commits instead of squash** — keeps `dev` | **Two steps, and the order matters — see the warning below.** ① Settings → Rules → Rulesets (or Settings → Branches for classic protection): untick **Require linear history** on `main`. ② Settings → General → Pull Requests: tick *Allow merge commits*, untick *Allow squash merging* **and** *Allow rebase merging* | Every merge gives `main` a commit whose **second parent is `dev`'s tip**, so **`dev` is permanently an ancestor of `main`** — that direction, not the reverse. **No divergence, no habit, nothing to remember.** Cost: `main`'s history shows every `dev` commit — for a single-developer repo that is arguably better, since you keep the real history instead of flattening it |
 | **2. Make `dev` disposable** — keeps squash | Branch per change off `main`, PR it, squash, delete the branch | Nothing long-lived exists to diverge. This is the pattern squash is built for. Cost: you lose the integration-branch concept — though with one developer there is nothing to integrate |
 | **3. Automate the back-merge** | A GitHub Action on push to `main` that merges `main` into `dev` | Works inside both rulesets (a real merge, no force). Cost: a workflow to maintain, and it manages the symptom rather than removing it |
 
@@ -140,7 +140,7 @@ stays.
 **Run the habit command once after switching**, to clear the divergence you already have. Switching
 the merge method does not retroactively fix it: the last squash (`Dev (#18)`) already left
 `main ahead 1, dev ahead 11` with identical content. The first merge-commit PR after that back-merge
-is what makes `main` an ancestor for good.
+is what makes **`dev` an ancestor of `main`** for good.
 
 ### Verifying it actually took
 
@@ -161,6 +161,19 @@ not take, and you are back in the trap.
 subject: Merge pull request #19 from drumforgod82/dev
 parents: 7d70581 6663923        <- two parents; 6663923 is dev's tip
 ```
+
+> 🔴 **The invariant runs one way only, and both directions are easy to say by mistake.** Under merge
+> commits, **`dev` is an ancestor of `main`** — every `dev` commit has landed. **`main` is *not* an
+> ancestor of `dev`**, and does not need to be: the commits `main` has that `dev` lacks are the merge
+> commits themselves, which carry **zero file changes**. Prove that any time with:
+>
+> ```bash
+> git fetch origin
+> git diff --stat origin/dev origin/main     # blank = merge commits only, no content
+> ```
+>
+> So **you never need to pull `main` into `dev`** in this setup. The back-merge habit above exists
+> only for the squash era, where `main` genuinely did carry content `dev` lacked.
 
 Expect `main ahead N, dev ahead 0` from here on, where **`N` is the number of merge-commit PRs that
 have landed**. Each PR adds one merge commit that lives only on `main`, so the count grows by one
