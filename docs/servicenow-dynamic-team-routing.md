@@ -1,5 +1,19 @@
 # ServiceNow → EDA Dynamic Team Routing
 
+> 🔴 **SUPERSEDED — do not build from this document.**
+>
+> The numbered guides replace it: [04 — The ServiceNow app](04-servicenow-app.md),
+> [06 — The Flow](06-servicenow-flow.md), and [Design decisions](design-decisions.md).
+>
+> **Two known errors remain here:**
+> 1. It states the route table is *"keyed on `team_code`, not assignment group, deliberately"*. It is
+>    keyed on **assignment group**; `team_code` is the display column and the payload label.
+> 2. Its §10 presents a ServiceNow **Decision Table** as a live upgrade path. That option was
+>    **evaluated and rejected** — see [Design decisions §3](design-decisions.md).
+>
+> Kept for now because its platform findings are accurate and not yet all migrated. It will be
+> removed.
+
 One flow, one action, one REST step. Routing comes from a config table, so adding a team is a
 row — no flow or action edits.
 
@@ -526,7 +540,7 @@ delete reports success — so retry rather than concluding the order was wrong.
 
 `my_eda_rulebook.yml` is still in the repo. It is **not** wired to anything: it conditions on the old
 flat `incident_created` value, which no current payload produces, so it cannot match. It survives only
-as the worked example behind [README Part 4](../README.md#part-4--the-payload-contract-read-this).
+as the worked example behind [README Part 4](05-servicenow-action.md).
 
 ---
 
@@ -1071,14 +1085,14 @@ security add-generic-password -a "$USER" -s sandbox-eda-team-c -w -U
 
 > 🔑 **Leave `-w` with no value** so it prompts instead of taking the token as an argument, which
 > would record it in your shell history. Full rationale, the read-back command, and the `~/.zshrc`
-> export are in [README 2.9](../README.md#on-macos-store-it-in-the-keychain). Optional — it is only
+> export are in [README 2.9](03-aap-eda-setup.md). Optional — it is only
 > needed if you want to POST at the stream directly in Phase 5.
 
 > ✅ **Verify:** it is exactly **64 characters**.
 
 ### Phase 2 — AAP, Automation Execution side
 
-Follow [Part 2](../README.md#part-2--per-team-setup) steps 2.1–2.5 with the Team C names above:
+Follow [Part 2](03-aap-eda-setup.md) steps 2.1–2.5 with the Team C names above:
 organization → inventory → credentials → project → job template.
 
 > ⚠️ **Do not forget *Prompt on launch* on the job template.** Without it the controller discards the
@@ -1088,7 +1102,7 @@ organization → inventory → credentials → project → job template.
 > dropdown lists both, because the controller project is this same repo. **Every team runs the same
 > playbook** — the per-team file is the *rulebook*, chosen on the activation in Phase 3. Picking the
 > rulebook here fails at event time with `ERROR! 'sources' is not a valid attribute for a Play`, which
-> sends you debugging the rulebook instead of this field. See [README 2.5](../README.md#25-create-the-job-template).
+> sends you debugging the rulebook instead of this field. See [README 2.5](03-aap-eda-setup.md).
 
 > ✅ **Verify:** the project shows **Successful** with a revision hash; the job template's name is
 > character-identical to `run_job_template.name` in your new rulebook; and its **Playbook** field is
@@ -1096,7 +1110,7 @@ organization → inventory → credentials → project → job template.
 
 ### Phase 3 — AAP, Automation Decisions side
 
-Follow [Part 2](../README.md#part-2--per-team-setup) steps 2.6–2.12: EDA credentials → decision
+Follow [Part 2](03-aap-eda-setup.md) steps 2.6–2.12: EDA credentials → decision
 environment → EDA project → event stream credential (the Phase 1 token, **bare**) → event stream →
 activation.
 
@@ -1155,7 +1169,7 @@ the table above:
 > nothing, while ServiceNow still reports a cheerful `2xx`. No amount of careful clicking finds that.
 
 Environment it needs: `SANDBOX_AAP_PAT_TOKEN`, `SN_PDI_HOST`, `SN_PDI_USERNAME`, `SN_PDI_PASSWORD`
-(see [README 2.9](../README.md#on-macos-store-it-in-the-keychain)), plus `AAP_GATEWAY` or `--gateway`.
+(see [README 2.9](03-aap-eda-setup.md)), plus `AAP_GATEWAY` or `--gateway`.
 Override the route table with `--route-table` if your scope prefix differs. `--json` emits
 machine-readable output for CI.
 
@@ -1231,7 +1245,7 @@ rulebook can dispatch without ServiceNow knowing anything about it:
 
 That keeps ServiceNow at one row per team, puts the branching in a purpose-built rule engine, and
 means changes ship through Git and the normal
-[change cycle](../README.md#213-the-change-cycle-for-any-rulebook-edit) rather than through Flow Designer.
+[change cycle](03-aap-eda-setup.md) rather than through Flow Designer.
 
 **So keep the route table at one row per team.** The options below only apply to the genuinely rare
 case where **the team itself changes based on incident content** — "P1 database incidents go to Team B
@@ -1494,6 +1508,24 @@ platform team owns it, rather than duplicating it into the decision logic.
 > To explore the feature first with no dependencies, make the element a plain **String** called
 > `Team code` and have decisions return `team-a` / `team-b`. Swap it to the reference later.
 
+> 🔴 **Set a display column on `EDA Team Route` first, or every decision row shows a raw sys_id.**
+> A reference field renders the target record's *display value*, which is whichever column has
+> `display = true` in the dictionary. `EDA Team Route` was created with **none**, so the Results
+> column reads `654ea626c3238bd0b08b9b377d0131dc` instead of `team-b`.
+>
+> **Do not add a `name` or `label` column for this.** Mark the existing **`team_code`** as the
+> display column: Studio → the table → Columns → `team_code` → tick **Display**. A new column would
+> duplicate `team_code` and give you two things to keep in step — the same dual-source-of-truth
+> problem that dropping `assignment_group` removes.
+>
+> `team_code` is the right choice over `event_stream_name` because it is already what travels
+> onward as `target_team` in the payload, in AAP's extra_vars and in the rulebook logs — so the
+> decision table reads the same identifier you see everywhere else.
+>
+> Only one column per table can be the display column; setting one clears the previous. Display
+> values are computed at render time, so existing decision rows pick it up immediately — there is
+> nothing to migrate and no need to re-publish.
+
 Stock examples of both shapes exist on your instance: `Deployment Migration to ReleaseOps` uses a
 `reference → sys_hub_flow` element alongside a `boolean` element.
 
@@ -1566,12 +1598,21 @@ wiring identical for all three record types — you pill the record's **Sys ID**
         return;
     }
 
-    // Input keys MUST match the decision table's input element names exactly.
-    // An unrecognised key is ignored silently, so a typo reads as "no rule matched".
+    // Input keys MUST match the decision table's input ELEMENT names, not the labels
+    // you typed in Decision Builder. Decision Builder prefixes generated elements with
+    // 'u_', so the label "Assignment group" becomes the element 'u_assignment_group'.
+    // Confirm yours before trusting this - an unrecognised key is ignored SILENTLY,
+    // so a wrong name reads as "no rule matched":
+    //   sys_decision_input?sysparm_query=model_id=<decision table sys_id>
+    //
+    // priority uses getDisplayValue() because the stored condition compares against the
+    // choice LABEL ("1 - Critical"), not the raw code ("1"). If your Choice input was
+    // built with raw values instead, switch this to getValue(). Decision Builder's
+    // Test button is the arbiter - it shows which side fails to match.
     var dtInput = {
-        assignment_group: record.getValue('assignment_group') || '',
-        record_type: recordType,
-        priority: record.getValue('priority') || ''
+        u_assignment_group: record.getValue('assignment_group') || '',
+        u_record_type: recordType,
+        u_priority: record.priority ? record.priority.getDisplayValue() : ''
     };
 
     // executeDecisions returns the answers keyed by answer-element name.
@@ -1579,8 +1620,8 @@ wiring identical for all three record types — you pill the record's **Sys ID**
 
     // An empty object is the normal "nothing matched" result - and is also what an
     // unpublished (status=draft) table returns. Check status before chasing conditions.
-    if (answers && answers.route) {
-        outputs.route_sys_id = String(answers.route);
+    if (answers && answers.u_route) {
+        outputs.route_sys_id = String(answers.u_route);
         outputs.found = true;
         return;
     }

@@ -162,9 +162,25 @@ subject: Merge pull request #19 from drumforgod82/dev
 parents: 7d70581 6663923        <- two parents; 6663923 is dev's tip
 ```
 
-Expect `main ahead 1, dev ahead 0` from here on. That single commit is the merge commit itself,
-which lives only on `main`. It is the steady state, not drift — see the warning under
-*How to tell you are in it*. No habit run is needed.
+Expect `main ahead N, dev ahead 0` from here on, where **`N` is the number of merge-commit PRs that
+have landed**. Each PR adds one merge commit that lives only on `main`, so the count grows by one
+every time — `main ahead 1` after PR #19, `ahead 3` after #21, and so on. It is the steady state,
+not drift. No habit run is needed.
+
+> 🔴 **A growing `main ahead` count is not divergence, and the only check that distinguishes them is
+> the ancestor test in the right direction.** Confirmed 2026-10-07 at `main ahead 3, dev ahead 0`:
+>
+> ```bash
+> git fetch origin
+> git merge-base --is-ancestor origin/dev origin/main && echo CLEAN || echo DIVERGED
+> git diff --quiet origin/main origin/dev && echo "content identical"
+> ```
+>
+> `CLEAN` plus identical content means there is nothing to do. **Running the arguments the other way
+> round — `origin/main origin/dev` — reports a false alarm every time**, because with merge commits
+> `main` carries commits `dev` has never seen by design. That mistake cost a wrong "you must
+> back-merge first" recommendation on 2026-10-07; the warning under *How to tell you are in it* says
+> the same thing and is easy to read past.
 
 ---
 

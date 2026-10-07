@@ -3,7 +3,7 @@
 #
 # The ansible.eda.webhook source below is a PLACEHOLDER. In AAP the activation's
 # event-stream source mapping replaces it at runtime with eda.builtin.pg_listener
-# (see README Part 2.6). The port is never actually bound.
+# (see docs/03-aap-eda-setup.md section 2.12). The port is never actually bound.
 #
 # Any edit to this file changes the SHA the source mapping is pinned to, so the
 # cycle for every change is:
