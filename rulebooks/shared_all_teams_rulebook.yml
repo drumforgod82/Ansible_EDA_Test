@@ -1,0 +1,139 @@
+---
+# EVALUATION ARTIFACT - Option A, "one rulebook to rule them all".
+#
+# One shared event stream feeds this one rulebook, which routes every team and
+# every record type. It exists to measure Option A against the per-team design
+# in docs/design-decisions.md section 1.5, not to replace it. The three
+# per-team rulebooks and their activations are untouched and still live.
+#
+# Delete this file and its activation once the comparison is recorded.
+#
+# The ansible.eda.webhook source below is a PLACEHOLDER, exactly as in the
+# per-team rulebooks. In AAP the activation's event-stream source mapping
+# replaces it at runtime with eda.builtin.pg_listener
+# (see docs/03-aap-eda-setup.md section 2.12). The port is never actually bound.
+#
+# Any edit to this file changes the SHA the source mapping is pinned to, so the
+# cycle for every change is:
+#   push -> sync the EDA project -> re-attach the event stream -> restart
+# Skipping the re-attach leaves the activation on the old hash and it fails with
+# "Rulebook has changed since the sources were mapped."
+#
+# WHY THREE RULES AND NOT NINE. The job template name and the organization are
+# derived from the event, so one rule serves every team for its record type.
+# The rule count does not grow as teams are added. That is Option A's real
+# advantage and the reason this shape is the one worth measuring.
+#
+# WHAT IS DIFFERENT FROM THE PER-TEAM RULEBOOKS, and it matters:
+# a per-team rulebook checks eda_event_stream_name to identify the tenant, and
+# that value is injected by the platform and cannot be forged. With ONE shared
+# stream that value is identical for every team, so it can no longer identify
+# anyone. The tenant here comes from target_team, which is part of the body the
+# sender writes. The allowlist in each condition is what bounds that: a sender
+# may select among enrolled teams and cannot name an arbitrary or privileged
+# organization. It bounds the exposure; it does not remove it.
+#
+# The stream check is kept anyway, fail-closed, so this rulebook cannot fire if
+# it is ever attached to a per-team stream by mistake.
+#
+# The write-back flags are deliberately FALSE. The handler playbooks default
+# them to false so a launch cannot move a real record, and this rulebook is for
+# measurement, so it must not close or resolve anything in the instance.
+- name: Shared - ServiceNow event automation (all teams)
+  hosts: all
+  sources:
+    - ansible.eda.webhook:
+        host: 0.0.0.0
+        port: 5000
+
+  rules:
+    # DERIVING THE TARGET. The organization and the template name are both
+    # built from target_team, the SAME field the allowlist checks:
+    #   team_a -> "Team A" -> "Team A Incident Handler"
+    # Never accept a separate organization field from the payload. Two fields
+    # can disagree, and a sender could then pass the allowlist on one while
+    # naming a different organization on the other. One field, one check.
+    - name: Launch incident handler for the named team
+      condition: >-
+        event.meta.eda_event_stream_name == "sn-shared" and
+        event.payload.event_type == "servicenow.incident.created" and
+        event.payload.target_team in ["team_a", "team_b", "team_c"]
+      action:
+        run_job_template:
+          name: "{{ event.payload.target_team | replace('_',' ') | title }} Incident Handler"
+          organization: "{{ event.payload.target_team | replace('_',' ') | title }}"
+          job_args:
+            extra_vars:
+              # default('') on EVERY mapping. One missing key without it fails the
+              # whole action with "Object of type StrictUndefined is not JSON
+              # serializable" and launches nothing at all.
+              incident_number: "{{ event.payload.incident_number | default('') }}"
+              short_description: "{{ event.payload.short_description | default('') }}"
+              priority: "{{ event.payload.priority | default('') }}"
+              cmdb_ci: "{{ event.payload.cmdb_ci | default('') }}"
+              state: "{{ event.payload.state | default('') }}"
+              assigned_to: "{{ event.payload.assigned_to | default('') }}"
+              category: "{{ event.payload.category | default('') }}"
+              sys_id: "{{ event.payload.sys_id | default('') }}"
+              # Reserved routing keys, carried through for audit and debugging.
+              event_version: "{{ event.payload.event_version | default('') }}"
+              source: "{{ event.payload.source | default('') }}"
+              target_team: "{{ event.payload.target_team | default('') }}"
+              # Which stream actually delivered this event. Under Option A this
+              # is the same value for every team, which is the point.
+              source_stream: "{{ event.meta.eda_event_stream_name | default('') }}"
+              # False on purpose: this rulebook measures routing and must not
+              # close a real incident. See the header.
+              sn_close_incident: false
+
+    # team_c is absent from this allowlist on purpose: there is no
+    # "Team C SCTASK Handler" job template and no SCTASK rule in
+    # team_c_rulebook.yml. The allowlist records which team and record-type
+    # combinations are actually enrolled, so an unenrolled one matches nothing
+    # rather than launching at a template that does not exist.
+    - name: Launch SCTASK handler for the named team
+      condition: >-
+        event.meta.eda_event_stream_name == "sn-shared" and
+        event.payload.event_type == "servicenow.sctask.created" and
+        event.payload.target_team in ["team_a", "team_b"]
+      action:
+        run_job_template:
+          name: "{{ event.payload.target_team | replace('_',' ') | title }} SCTASK Handler"
+          organization: "{{ event.payload.target_team | replace('_',' ') | title }}"
+          job_args:
+            extra_vars:
+              task_number: "{{ event.payload.task_number | default('') }}"
+              short_description: "{{ event.payload.short_description | default('') }}"
+              catalog_item: "{{ event.payload.catalog_item | default('') }}"
+              assignment_group: "{{ event.payload.assignment_group | default('') }}"
+              sys_id: "{{ event.payload.sys_id | default('') }}"
+              event_version: "{{ event.payload.event_version | default('') }}"
+              source: "{{ event.payload.source | default('') }}"
+              target_team: "{{ event.payload.target_team | default('') }}"
+              source_stream: "{{ event.meta.eda_event_stream_name | default('') }}"
+              sn_close_task: false
+
+    - name: Launch problem handler for the named team
+      condition: >-
+        event.meta.eda_event_stream_name == "sn-shared" and
+        event.payload.event_type == "servicenow.problem.created" and
+        event.payload.target_team in ["team_a", "team_b", "team_c"]
+      action:
+        run_job_template:
+          name: "{{ event.payload.target_team | replace('_',' ') | title }} Problem Handler"
+          organization: "{{ event.payload.target_team | replace('_',' ') | title }}"
+          job_args:
+            extra_vars:
+              problem_number: "{{ event.payload.problem_number | default('') }}"
+              short_description: "{{ event.payload.short_description | default('') }}"
+              assignment_group: "{{ event.payload.assignment_group | default('') }}"
+              cmdb_ci: "{{ event.payload.cmdb_ci | default('') }}"
+              sys_id: "{{ event.payload.sys_id | default('') }}"
+              event_version: "{{ event.payload.event_version | default('') }}"
+              source: "{{ event.payload.source | default('') }}"
+              target_team: "{{ event.payload.target_team | default('') }}"
+              source_stream: "{{ event.meta.eda_event_stream_name | default('') }}"
+              # sn_resolve_problem, NOT sn_close_problem: the playbook targets
+              # Resolved and leaves the formal close to problem management.
+              # False here for the same reason as the other two.
+              sn_resolve_problem: false
