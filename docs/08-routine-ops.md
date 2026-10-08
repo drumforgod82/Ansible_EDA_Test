@@ -342,9 +342,14 @@ findings and a human closes the record.
 ## 4. Rotate an event stream token
 
 **Which of these you are doing depends on the choice made in
-[03 §2.9](03-aap-eda-setup.md).** Under **one token per team** (the default) rotation is per team and
-touches nobody else — that is most of the reason to prefer it. Under a **single shared token** every
-team rotates at once, in lockstep.
+[03 §2.9](03-aap-eda-setup.md).** Under **one token per team** (the default the guides teach) rotation
+is per team and touches nobody else — that is most of the reason to prefer it. Under a **single shared
+token** every team rotates at once, in lockstep.
+
+> 📌 **On this lab, since 2026-10-08, the shared token is the live design**, so
+> [§4.1](#41-shared-token-rotation--the-path-this-lab-is-on-since-2026-10-08) is the procedure that
+> applies here. The per-team steps directly below are kept because the guides teach that default and
+> because reverting to it is one field edit per route row.
 
 > 🔴 **Shared-token rotation is an all-teams operation with a live failure window.** You are changing
 > one value in two places, and between those two saves **every** team's events are rejected with
@@ -373,6 +378,78 @@ Per-team rotation, the default:
 
 > ℹ️ **Nothing else needs touching.** The route row holds the UUID, not the token, so it is
 > unaffected. No restart, no re-publish.
+
+### 4.1 Shared-token rotation — the path this lab is on since 2026-10-08
+
+This instance runs one shared token
+([design decisions §1.5](design-decisions.md#15-tokens-one-per-stream-by-default-or-one-shared--a-real-choice)),
+so this is the procedure that applies here. It is the same two edits as above, except that there is
+one of each object instead of one per team, and **every team is affected at once**.
+
+1. Pick a window. Between steps 3 and 4 **all** teams are rejected, so do this when a gap in
+   automation is acceptable.
+2. Generate one new token, check its length, and put it on the clipboard — all without printing it
+   to the screen. Run these three lines in the same shell, in order:
+
+   ```bash
+   NEW_TOKEN="$(openssl rand -hex 32)"
+   printf '%s' "$NEW_TOKEN" | wc -c
+   printf '%s' "$NEW_TOKEN" | pbcopy
+   ```
+
+   Expected output: the second line prints `64` and nothing else. The third prints nothing — the
+   token is now on the clipboard, ready to paste into steps 3 and 4.
+
+   > ⚠️ **Generate your own value.** Never reuse a token printed in any guide, including these.
+
+   > 🔑 **Check the same value you are about to use.** Running `openssl rand -hex 32` a second time
+   > produces a *different* token, so a length check on a fresh command proves nothing about the one
+   > you pasted. That is why the value is captured in `NEW_TOKEN` once and then measured.
+
+   When both edits are done, clear the variable and the clipboard so the token does not linger:
+
+   ```bash
+   unset NEW_TOKEN
+   printf '' | pbcopy
+   ```
+
+   Neither command prints anything.
+3. **AAP** — open **Automation Decisions → Infrastructure → Credentials → `shared-stream-token`**
+   and replace the **Token** field with the new value. From here until step 4 completes, every
+   team's events are rejected with `403`.
+4. **ServiceNow** — go to **All → Connections & Credentials → Credentials**, open the single
+   **`Ansible EDA Shared Stream Token`** record, and replace the **API Key** value with the same
+   string. Store it **bare**: the 64 characters on their own, with no word such as `Bearer` and no
+   space in front of them. A scheme word here is rejected as a `403` that reads like a permissions
+   problem.
+5. If you keep the token in the macOS Keychain, update the **one** item that now holds the shared
+   value. On this lab that is the item originally created for the first team, because its token
+   became the shared one:
+
+   ```bash
+   security add-generic-password -a "$USER" -s sandbox-eda-team-a -w -U
+   ```
+
+   `-w` with no value makes it prompt twice so the token never reaches your shell history, and `-U`
+   updates the existing item instead of failing. It prints nothing on success.
+
+   > ⚠️ **The other per-team items are now stale.** `sandbox-eda-team-b` and `sandbox-eda-team-c`
+   > still hold their old per-team values, which no stream accepts any more. Leave them if you may
+   > revert, but do not treat them as live.
+6. Re-test **one** team immediately ([07 §2](07-end-to-end-test.md)). Because one token now serves
+   every stream, one team passing means they all have the right value.
+
+> 🔴 **Never rotate "just one team" on this design.** There is only one credential object behind all
+> of the streams, so changing it changes every team. If you need to rotate one team in isolation, you
+> are asking for option A and should move that team onto its own credential first.
+
+> ℹ️ **Why one re-test is enough here, when per-team rotation needs one each.** Under option A each
+> team has its own value, so each is a separate chance to paste it wrongly. Under a shared token there
+> is one value in two places — if one team works, the value matched.
+
+> ⚠️ **Read the field back after saving it, on both sides.** A write that silently does nothing looks
+> exactly like a write that worked; see the warning in
+> [design decisions §1.5](design-decisions.md#15-tokens-one-per-stream-by-default-or-one-shared--a-real-choice).
 
 ---
 

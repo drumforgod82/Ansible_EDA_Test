@@ -412,7 +412,7 @@ here than to change later, and it affects how many objects you build in
 | | **A — one token per team** *(the default these guides assume)* | **B — one shared token** |
 |---|---|---|
 | Run the command above | once **per team** | **once, total** |
-| AAP Event Stream credentials (§2.10) | one per team | **one**, reused by every stream |
+| AAP Event Stream credentials (§2.10) | one per team | **one credential object**, referenced by every stream |
 | ServiceNow credential + alias + connection ([04 §5](04-servicenow-app.md)) | one set **per team** | **one set, total** |
 | A leaked token exposes | that one team's stream | **every** stream |
 | Rotating a token ([08 §4](08-routine-ops.md)) | that team only | **all teams at once**, in lockstep |
@@ -420,9 +420,25 @@ here than to change later, and it affects how many objects you build in
 > ℹ️ **Sharing a token cannot misroute anything, which is why B is a legitimate choice rather than a
 > shortcut.** The **UUID** decides which stream a POST lands on, and that stays per team either way;
 > the token only proves the caller is allowed to post. Each stream checks the incoming header against
-> its own stored value, and those values are allowed to be identical. Full reasoning and an
-> object-count comparison at 3 and 30 teams:
+> the credential attached to it. Full reasoning and an object-count comparison at 3 and 30 teams:
 > [Design decisions §1.5](design-decisions.md#15-tokens-one-per-stream-by-default-or-one-shared--a-real-choice).
+
+> ✅ **B was measured end to end on 2026-10-08, not just reasoned about.** One credential object served
+> three streams in three different organizations. One record per team produced exactly one event on
+> that team's stream, no movement on the others, and three jobs — one per team, each from its own
+> ruleset. Routing isolation survived sharing the token.
+
+> 🔴 **If you take B, share the credential *object* — not just the token *value*.** Pasting the same
+> 64-character string into one credential per team authenticates exactly the same way, so a test
+> passes, but you still maintain 30 credentials in AAP and 90 objects in ServiceNow. You would get a
+> shared token's blast radius with none of its saving, which is worse than option A. The two cases are
+> set out side by side in
+> [design decisions §1.5](design-decisions.md#15-tokens-one-per-stream-by-default-or-one-shared--a-real-choice).
+
+> ⚠️ **Permitted is not supported.** Red Hat documents only that *each event stream must have exactly
+> one credential*, and publishes nothing on whether one credential may serve several streams. B works
+> on AAP 2.7 as measured above; it is not something the vendor has blessed. Ask before relying on it
+> outside a lab.
 
 **A is recommended** — a leak stays contained and rotation never becomes an all-teams outage. **B is
 defensible on a single-owner lab**, where containing a leak "to one team" protects you from yourself,
