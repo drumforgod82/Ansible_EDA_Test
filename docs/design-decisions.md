@@ -100,6 +100,14 @@ reasons"* — never as *"Red Hat's recommended pattern."*
 The stream's bearer token lives on an Automation Decisions credential of type
 `ServiceNow Event Stream`, and that credential is what the endpoint checks on every POST.
 
+> 📌 **What this lab runs today, changed 2026-10-08: the shared token.** All three teams authenticate
+> with **one** credential object — `shared-stream-token` in AAP, reached through the single
+> `Ansible EDA Shared Alias` in ServiceNow. The guides in
+> [03 §2.9](03-aap-eda-setup.md) still *teach* one token per team, because that is the better default
+> for a shared-ownership environment; this single-owner lab deliberately took the other path to test
+> whether it works. It does — see the measurements below. The per-team aliases for the second and
+> third teams still exist but no route row points at them, so reverting is one field edit per row.
+
 **First, the thing that makes this a free choice rather than a constraint: the token and the UUID do
 different jobs.**
 
@@ -111,8 +119,47 @@ different jobs.**
 So sharing a token **cannot** misroute anything. ServiceNow still sends each record to exactly one
 team's UUID, taken from that record's route row ([04 §4.1](04-servicenow-app.md)). Routing
 correctness comes from the UUID; the token is only authentication. Nothing in EDA compares tokens
-across streams, so two streams holding identical token values is a supported configuration, not a
-hack.
+across streams.
+
+**Measured end to end on 2026-10-08.** This was reasoning until that date, so it is now recorded as
+a result rather than an argument. With one shared token serving three streams in three different
+organizations, one qualifying record was created per team. Each team's stream counter rose by exactly
+one, no other team's counter moved, and three jobs launched — one per team, each from its own ruleset,
+each with `target_team` and `source_stream` matching that record's own team. Sharing the token cost
+nothing in routing isolation.
+
+#### Two different things are both called "sharing a token"
+
+They behave identically at the endpoint and they are **not** interchangeable, because only one of
+them saves you anything. A **credential object** is the stored record; a **token value** is the
+64-character string inside it.
+
+| | What you build | Objects at 30 teams | Saves work? |
+|---|---|---|---|
+| **One shared credential object** | a single Event Stream credential, reused by every stream | 1 AAP + 3 ServiceNow | **Yes.** This is the whole argument for sharing |
+| **Same token value, pasted into one credential per team** | 30 separate credentials that happen to hold the same string | 30 AAP + 90 ServiceNow | **No.** Identical object count to per-team tokens |
+
+Both authenticate, so a test passes either way. The second gives you a shared token's blast radius
+**and** the full per-team administrative burden, which is strictly worse than giving each team its own
+token. If you share, share the object.
+
+> ✅ **Measured 2026-10-08:** one credential object can be referenced by event streams belonging to
+> **different organizations**. An event stream owned by one organization was repointed at a credential
+> owned by another; the change was accepted and a request carrying that shared token was accepted at
+> the stream. This had never been tested before that date and is the premise the whole shared-token
+> option rests on.
+
+> ⚠️ **Permitted is not the same as supported.** What the measurement shows is that the platform
+> allows this, not that Red Hat endorses it. Red Hat documents only that *each event stream must have
+> exactly one credential* and says nothing about the reverse direction — whether one credential may
+> serve several streams. Treat it as working-but-unblessed and ask the vendor before relying on it in
+> production.
+
+> ℹ️ **The organization boundary on credentials is not applied consistently.** Attaching another
+> organization's credential to a **job template** is refused outright (measured: HTTP 400,
+> `Credential matching query does not exist`), while referencing another organization's credential
+> from an **event stream** is accepted and works (measured 2026-10-08). Same credential concept, two
+> different answers depending on what you attach it to. Do not generalise either result to the other.
 
 What differs is **blast radius and rotation**:
 
@@ -120,8 +167,8 @@ What differs is **blast radius and rotation**:
 |---|---|---|
 | A leaked token lets the holder post to | that one stream | **every** stream whose UUID they also know |
 | Rotation | per team, isolated, no coordination | **lockstep** — every AAP credential and every ServiceNow credential at once, with a window where mismatches return `403` ([08 §4](08-routine-ops.md)) |
-| AAP objects | one Event Stream credential per team | **one**, reusable by every stream |
-| ServiceNow objects | credential + alias + connection **per team** | **one set total**, with every route row's `connection_alias` pointing at it |
+| AAP objects | one Event Stream credential per team | **one credential object**, referenced by every stream |
+| ServiceNow objects | credential + alias + connection **per team** | **one set total**, with every route row's `connection_alias` pointing at that one alias |
 | Objects at 3 teams | 3 AAP + 9 ServiceNow | 1 AAP + 3 ServiceNow |
 | Objects at 30 teams | 30 AAP + 90 ServiceNow | 1 AAP + 3 ServiceNow |
 
@@ -137,10 +184,31 @@ team's endpoint from another's.
 - **At scale, if the per-team object count is what stops you shipping.** The 30-team column above is
   the honest version of this argument: 120 objects to maintain and rotate by hand, versus 4.
 
+**Keep the alias on the route row even when every row holds the same value.** Under a shared token all
+thirty rows name one alias, so the `connection_alias` column looks like redundancy and invites someone
+to delete it and hard-code the alias into the flow's REST step instead. Do not. The column costs one
+reference per row and it is the seam that lets a single team be moved onto a different alias later —
+a team with its own trust requirement, a team on a separate AAP instance, a team mid-migration —
+**without editing the flow at all**. Hard-coding removes that option and buys nothing.
+
+> ℹ️ **Why the flow does not care.** The REST step takes the alias as a bare reference pill — a
+> dragged-in token representing the route row's `connection_alias` field — so it resolves per record
+> at run time. Pointing a row at a different alias is a field edit, not a flow change. The flow build
+> is in [06 — the ServiceNow flow](06-servicenow-flow.md).
+
 **If you take the shared path, write it down.** The failure mode is not technical — it is somebody
 later assuming isolation that is not there, rotating "just Team B's token" and taking down all of
-them. Record it in the route table's description or alongside this section, so the next person reads
-the decision rather than inferring a guarantee.
+them. Record the decision where the next person will actually meet it.
+
+> ⚠️ **The table's own description field is not writable through the Table API.** A `PATCH` to
+> `short_description` on the table record returns `200` and changes nothing — tried twice on
+> 2026-10-08 and confirmed empty afterwards by reading it back. Either set it in the user interface,
+> or put the note somewhere the API does accept it. On this instance it is recorded in two places that
+> a reader meets anyway: the **description of the shared connection alias** in ServiceNow, and the
+> **description of the shared Event Stream credential** in AAP.
+
+> 🔑 **A `200` that changes nothing looks exactly like success.** Always read the field back after
+> writing it. This applies to every write in these guides, not just this one.
 
 > 🔴 **Never share the UUID, whichever token scheme you pick.** One UUID per stream is not a
 > preference — two teams pointed at one UUID means both teams' records land on one stream, and
