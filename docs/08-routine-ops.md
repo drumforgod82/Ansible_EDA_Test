@@ -501,40 +501,55 @@ one of each object instead of one per team, and **every team is affected at once
 
 ### 4.2 Temporary objects in the sandbox — what they are and when to remove them
 
-If you open the sandbox and find more objects than the three teams account for, these are why. All
-of them were created on 2026-10-08 to measure the single-rulebook option against the per-team one,
-and all of them are **temporary**. None of them touches the three live teams.
+**There are none right now.** This section is kept as a record, because other pages point at it to
+explain where the experiment objects went, and because it is the pattern to follow next time.
 
-| Object | Where | What it is |
+Five objects were created on 2026-10-08 to measure the single-rulebook option and the delivery
+semantics of a shared stream, and **all five were removed on 2026-10-08** once their results were
+recorded. Nothing about the three live teams was touched at any point, and all three verified clean
+afterwards.
+
+| Object | What it was for | Result it produced |
 |---|---|---|
-| `sn-shared` | Automation Decisions → Event Streams | The one shared stream the single-rulebook experiment posts to. Uses the same credential as the three team streams |
-| `shared-all-teams-optiona` | Automation Decisions → Rulebook Activations | The experiment's own activation, running `shared_all_teams_rulebook.yml`. Separate from the three team activations, which are untouched |
-| `eda_team_a_launcher` | Access Management → Users | A **non-administrative** account holding `Organization Execute` on one organization only. Created to measure what a team-scoped launching account can and cannot reach. Its password is in the macOS Keychain under `sandbox-aap-team-a-launcher` |
-| `exp4-listener-1` and `exp4-listener-2` | Automation Decisions → Rulebook Activations | Two activations running the **same** catch-all rulebook on the **same** shared stream, built to answer whether one stream feeding several activations fans out or queues. It fans out — see [design decisions §1.3](design-decisions.md#13-experiment-4--run-and-the-answer-is-fan-out). They log every event and launch nothing. Safe to delete now the result is recorded |
+| Event stream `sn-shared` | One shared stream for the single-rulebook experiment | — |
+| Activation `shared-all-teams-optiona` | One rulebook routing every team from a payload field | Confirmed that one activation can launch into several organizations, and that the launch action builds its target from the event |
+| Activations `exp4-listener-1` and `exp4-listener-2` | Two activations running the **same** catch-all rulebook on the **same** stream | Confirmed **fan-out** — [design decisions §1.3](design-decisions.md#13-experiment-4--run-and-the-answer-is-fan-out) |
+| User `eda_team_a_launcher` | A non-administrative account with execute rights on one organization only | Confirmed the platform enforces per-organization launch scoping |
 
-> ℹ️ **Why a separate activation rather than repointing an existing one.** The three team activations
-> are the live per-team design, and the experiment needed to run beside them rather than replace
-> them, so both could be compared on the same platform on the same day. An activation is a pod, so
-> the cost of keeping both is one extra pod ([design decisions §1.6](design-decisions.md)).
+**The pattern worth repeating.** Every one of those was a **new** object beside the live ones, never
+an edit to them. That is why the three teams kept running throughout, why the comparison could be
+made on the same platform on the same day, and why removing it all was a deletion rather than a
+restoration.
 
-**To remove them when the comparison is finished**, in this order:
+### 4.3 Removing temporary objects — the order matters
 
-1. Disable and delete the activations `shared-all-teams-optiona`, `exp4-listener-1` and
-   `exp4-listener-2`. **Remove the two listeners first if you are leaving the shared stream in
-   place**, because a catch-all attached to a live stream fires on everything.
-2. Delete the event stream `sn-shared`.
-3. Delete `rulebooks/shared_all_teams_rulebook.yml` from the repository and sync the project.
-4. Delete the user `eda_team_a_launcher`, and its role assignment goes with it.
-5. Remove the Keychain item:
+If you build experiment objects again, remove them like this.
+
+1. **Delete any catch-all activation first**, before anything else, if the stream it listens on is
+   staying. A catch-all matches every event, so an orphaned one on a live stream fires forever.
+2. Delete the other experiment activations.
+3. Delete the experiment event stream.
+4. Delete any account created for the experiment. Its role assignments go with it — worth confirming
+   rather than assuming.
+5. Delete the Keychain item holding that account's password:
 
    ```bash
-   security delete-generic-password -a "$USER" -s sandbox-aap-team-a-launcher
+   security delete-generic-password -a "$USER" -s <the-item-name>
    ```
 
-   Expected output: a line beginning `password has been deleted.`
+   Expected output: `password has been deleted.` followed by the keychain path.
 
-> ⚠️ **Do not delete the three per-team objects while tidying up.** The names are similar enough to
-> confuse: `sn-shared` is the experiment, `sn-team-a`, `sn-team-b` and `sn-team-c` are live.
+> 🔑 **Do not delete the shared event-stream credential while tidying up.** On this instance every
+> live team stream uses it, so removing it would break all three. Only the experiment's *stream* was
+> deleted, never the credential behind it.
+
+> ℹ️ **An activation does not need disabling first.** `DELETE` on a running activation works and
+> returns `204`. Attempting to disable it first by patching `is_enabled` returns `409` — measured
+> 2026-10-08. Deleting directly is the shorter and correct route.
+
+> ✅ **Verify afterwards:** run `scripts/verify_team.py` for every live team. After the 2026-10-08
+> teardown all three passed — two at 46 of 46 checks, and the third at 40 of 40 with one skipped,
+> that skip being a record type that team does not handle.
 
 ---
 
