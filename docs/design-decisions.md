@@ -40,9 +40,16 @@ launches too." If it is a queue, a shared stream is merely inconvenient.
 
 ### 1.2 The evidence: it is fan-out
 
-> 🔴 **This is inference from reading the upstream `ansible/eda-server` source, not a documented
-> guarantee and not proof by observation.** Red Hat's documentation does not state the delivery
-> semantics of a stream mapped to multiple activations anywhere.
+> ✅ **Measured 2026-10-08 — it is fan-out, observed rather than inferred.** Three activations were
+> pointed at one shared stream, two of them running the identical catch-all rulebook so the
+> comparison was symmetric. Five events were posted one at a time, each with its own identifier, and
+> every activation's log was read separately. **All three logged all five: fifteen receipts for five
+> events.** A queue would have produced five in total. Five trials, not one, because under queue
+> semantics the winning consumer can alternate.
+>
+> **Red Hat still documents nothing about delivery semantics**, so this is what this version does
+> rather than a guarantee you can hold them to. The reasoning below explains *why* it behaves this
+> way and is worth keeping for that — but the conclusion no longer rests on it.
 
 - `Activation.event_streams` is a genuine many-to-many relationship. Nothing in the schema limits a
   stream to one activation.
@@ -56,10 +63,11 @@ launches too." If it is a queue, a shared stream is merely inconvenient.
 Therefore: **N activations on one stream = N listeners on one broadcast channel = N copies of every
 event = potentially N job launches from one ServiceNow POST.**
 
-### 1.3 Experiment 4 — still outstanding
+### 1.3 Experiment 4 — run, and the answer is fan-out
 
-**"Experiment 4"** is the test that would confirm the above empirically rather than by inference.
-Several notes in this repository refer to it, so here is what it is:
+**"Experiment 4"** was the test that would confirm the above empirically rather than by inference.
+It was run on 2026-10-08. Several notes in this repository refer to it, so here is what it was and
+what it found:
 
 1. Map the **same** catch-all rulebook (`rulebooks/catchall_debug_rulebook.yml`) onto both Team A's
    and Team B's activations.
@@ -69,9 +77,22 @@ Several notes in this repository refer to it, so here is what it is:
 
 **Two logs confirms fan-out. One log would falsify it.**
 
-> ⚠️ **It has not been run.** `catchall_debug_rulebook.yml` was to be deleted once Experiment 4 was
-> recorded, and it is still in the repository — which is how you can tell. Until then, §1.2 remains
-> inference.
+> ✅ **Result, 2026-10-08: fan-out.** Run with three activations rather than two — the two symmetric
+> catch-all listeners plus one unrelated activation already on that stream — and repeated five
+> times. Every activation logged every event: **fifteen receipts for five events**, where a queue
+> would have produced five. Both listeners' logs contain the same event identifier, each with its
+> own rules engine reporting the event received. No job was launched, because the probe carried an
+> event type no rule matches.
+>
+> **So §1.2 is now a measurement, not an inference.** What remains unanswered is whether the
+> behaviour is *supported* rather than simply what this version does, because the vendor publishes
+> no statement on delivery semantics either way.
+
+> ℹ️ **`catchall_debug_rulebook.yml` has served its purpose and can now be deleted**, along with the
+> two `exp4-listener-*` activations the run created
+> ([08 §4.2](08-routine-ops.md#42-temporary-objects-in-the-sandbox--what-they-are-and-when-to-remove-them)).
+> It is kept for the moment only so the experiment can be repeated on a future AAP version, since
+> the result is a property of the implementation rather than a documented contract.
 
 > 🔴 **While it exists, never attach `catchall_debug_rulebook.yml` to a production activation.** It
 > matches every event on purpose. See

@@ -54,6 +54,36 @@ immediately.
 
 Worked example: adding **Team C** to an instance that already has Team A and Team B.
 
+> 🔴 **Before you add a team, check which token scheme this instance is on.** Both the manual steps
+> below and `scripts/provision_team.py` build the **documented default: one token per team**
+> ([03 §2.9](03-aap-eda-setup.md)). Since 2026-10-08 this lab runs the documented **alternative** —
+> one shared token for every team
+> ([design decisions §1.5](design-decisions.md#15-tokens-one-per-stream-by-default-or-one-shared--a-real-choice)).
+> Neither the steps nor the script are wrong; they build what the guides teach. But if you follow
+> them as written on this instance you will end up with a **mixed estate**, and that is worth
+> avoiding deliberately rather than by accident.
+>
+> **Why a mixed estate bites later, not now.** The new team works perfectly. Nothing errors. Then at
+> the next expiry somebody rotates "the shared token", the existing teams change over, and the new
+> team carries on working on its own key — so the rotation looks complete when it is not. The next
+> person to touch it has no reason to suspect two schemes are in play.
+>
+> **Pick one before you start:**
+>
+> 1. **Put the new team on the shared token** (keeps this instance consistent). Provision normally,
+>    then make two edits: point the new stream's **Credential** at the existing shared credential,
+>    and point the new route row's **connection_alias** at the existing shared alias. The per-team
+>    credential and alias the run created are then unused and can be left or deleted. Both edits are
+>    the same ones described in [§4.1](#41-shared-token-rotation--the-path-this-lab-is-on-since-2026-10-08).
+> 2. **Leave the new team on its own token** (matches the guides, and is the better design — see
+>    §1.5). Then **write it down in the route table's description**, because you now have two schemes
+>    and the rotation procedure differs per team.
+>
+> ✅ **Verify either way:** the new team's stream and route row point at the credential and alias you
+> intended, and you can say which rotation procedure applies to it — [§4](#4-rotate-an-event-stream-token)
+> for its own token, or [§4.1](#41-shared-token-rotation--the-path-this-lab-is-on-since-2026-10-08)
+> for the shared one.
+
 ### 2.0 By hand, or with the provisioning script?
 
 There are two ways to do this, and the recommendation depends on whether you have done it before.
@@ -480,6 +510,7 @@ and all of them are **temporary**. None of them touches the three live teams.
 | `sn-shared` | Automation Decisions → Event Streams | The one shared stream the single-rulebook experiment posts to. Uses the same credential as the three team streams |
 | `shared-all-teams-optiona` | Automation Decisions → Rulebook Activations | The experiment's own activation, running `shared_all_teams_rulebook.yml`. Separate from the three team activations, which are untouched |
 | `eda_team_a_launcher` | Access Management → Users | A **non-administrative** account holding `Organization Execute` on one organization only. Created to measure what a team-scoped launching account can and cannot reach. Its password is in the macOS Keychain under `sandbox-aap-team-a-launcher` |
+| `exp4-listener-1` and `exp4-listener-2` | Automation Decisions → Rulebook Activations | Two activations running the **same** catch-all rulebook on the **same** shared stream, built to answer whether one stream feeding several activations fans out or queues. It fans out — see [design decisions §1.3](design-decisions.md#13-experiment-4--run-and-the-answer-is-fan-out). They log every event and launch nothing. Safe to delete now the result is recorded |
 
 > ℹ️ **Why a separate activation rather than repointing an existing one.** The three team activations
 > are the live per-team design, and the experiment needed to run beside them rather than replace
@@ -488,7 +519,9 @@ and all of them are **temporary**. None of them touches the three live teams.
 
 **To remove them when the comparison is finished**, in this order:
 
-1. Disable and delete the activation `shared-all-teams-optiona`.
+1. Disable and delete the activations `shared-all-teams-optiona`, `exp4-listener-1` and
+   `exp4-listener-2`. **Remove the two listeners first if you are leaving the shared stream in
+   place**, because a catch-all attached to a live stream fires on everything.
 2. Delete the event stream `sn-shared`.
 3. Delete `rulebooks/shared_all_teams_rulebook.yml` from the repository and sync the project.
 4. Delete the user `eda_team_a_launcher`, and its role assignment goes with it.

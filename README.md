@@ -73,6 +73,7 @@ Work through these in order. Each one ends with a checkpoint you can verify befo
 
 | # | Document | What you get | Skip it if… |
 |---|---|---|---|
+| **00** | [Set up your own computer](docs/00-workstation-setup.md) | Python, PyYAML, Git and a clone of this repo on macOS, Windows 11 or Linux, with the environment variables the tools need | You are following the build guides by hand and will not run the tools in `scripts/` |
 | **01** | [Provision AAP](docs/01-provision-aap.md) | An AAP instance you can reach, sized so EDA works | Red Hat hosts your AAP — then skip its §3 and §4 |
 | **02** | [Provision the ServiceNow PDI](docs/02-provision-pdi.md) | A ServiceNow instance with the four plugins enabled | You already have one |
 | **03** | [AAP / EDA setup](docs/03-aap-eda-setup.md) | Per team: a job template, an event stream, a running activation | — |
@@ -148,8 +149,11 @@ These are not stages. Read them when the question comes up.
 
 ## 4. Tooling
 
-Two Python tools in [`scripts/`](scripts/), standard library only. Both take `--gateway` or read
-`AAP_GATEWAY`.
+Two Python tools in [`scripts/`](scripts/). They need Python 3.9 or newer and **PyYAML** — the only
+dependency that is not part of Python itself — and both take `--gateway` or read `AAP_GATEWAY`.
+[`scripts/README.md`](scripts/README.md) covers the prerequisites, the environment variables each
+one needs, and which to run when. If nothing is installed on your computer yet, start at
+[00 — Set up your own computer](docs/00-workstation-setup.md).
 
 | Tool | What it does |
 |---|---|
@@ -192,6 +196,7 @@ Two Python tools in [`scripts/`](scripts/), standard library only. Both take `--
 │   ├── verify_team.py
 │   └── provision_team.py
 ├── docs/
+│   ├── 00-workstation-setup.md                  # your computer: macOS, Windows 11, Linux
 │   ├── 01-provision-aap.md  …  10-troubleshooting.md     # the build sequence
 │   ├── glossary.md                              # every term
 │   ├── rulebook-anatomy.md                      # a rulebook, annotated
@@ -211,7 +216,7 @@ Two Python tools in [`scripts/`](scripts/), standard library only. Both take `--
 > fault. It is kept because [Experiment 4](docs/design-decisions.md) needs it.
 > `my_eda_rulebook.yml` is the **single-rulebook reference shape**, for anyone who would rather run
 > one rulebook than one per team; it is inert as shipped and its header lists what to change. Details:
-> [Rulebook anatomy §5](docs/rulebook-anatomy.md#5--two-rulebooks-in-this-repo-must-not-be-attached--leave-them-alone).
+> [Rulebook anatomy §5](docs/rulebook-anatomy.md#5--not-every-rulebook-here-is-safe-to-attach).
 
 > ⚠️ **Rulebooks must live in `rulebooks/` or `extensions/eda/rulebooks/` at the repository root.**
 > The search is **not** recursive — a rulebook anywhere else is invisible to AAP.
