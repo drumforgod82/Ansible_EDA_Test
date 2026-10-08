@@ -385,7 +385,8 @@ Wait for **Completed**.
 > remote actually has. On a from-zero build where you are authoring a rulebook, push first.
 
 Then check **Automation Decisions → Rulebooks**. Every team's project discovers **every** rulebook in
-the repo, so you will see all five — `team_a`, `team_b`, `team_c`, `my_eda` and `catchall_debug`. You
+the repo, so you will see every one of them — `team_a`, `team_b`, `team_c`,
+`shared_all_teams`, `my_eda` and `catchall_debug`. You
 pick the right one by hand in §2.12; nothing filters the list for you.
 
 > 🔴 **Two of those five must never be attached to an activation.**
@@ -393,7 +394,7 @@ pick the right one by hand in §2.12; nothing filters the list for you.
 > every job, while producing a symptom that looks like a completely different fault.
 > `my_eda_rulebook.yml` is a single-team reference shape and is inert as shipped. Both are kept
 > deliberately. Details and the full list:
-> [Rulebook anatomy §5](rulebook-anatomy.md#5--two-rulebooks-in-this-repo-must-not-be-attached--leave-them-alone).
+> [Rulebook anatomy §5](rulebook-anatomy.md#5--not-every-rulebook-here-is-safe-to-attach).
 
 ![EDA project settings](images/24-eda-project.png)
 
@@ -589,7 +590,7 @@ That `<uuid>` goes into this team's route-table row in ServiceNow.
 | Name | `<team>-incidents` |
 | Organization | `<Team>` |
 | Project | `Ansible EDA Test - <Team>` |
-| Rulebook | `team_<x>_rulebook.yml` — **pick carefully; the list shows all five, and two must not be attached** ([why](rulebook-anatomy.md#5--two-rulebooks-in-this-repo-must-not-be-attached--leave-them-alone)) |
+| Rulebook | `team_<x>_rulebook.yml` — **pick carefully; the list shows every rulebook in the repo, and not all of them are safe to attach** ([why](rulebook-anatomy.md#5--not-every-rulebook-here-is-safe-to-attach)) |
 | Credential | `<Team> AAP Controller` |
 | Decision environment | `DE Supported RHEL9 - <Team>` |
 | Restart policy | On failure |

@@ -230,17 +230,19 @@ ansible_rulebook.engine - INFO - load source eda.builtin.pg_listener
 
 ---
 
-## 5. 🔴 Two rulebooks in this repo must not be attached — leave them alone
+## 5. 🔴 Not every rulebook here is safe to attach
 
-Your EDA project discovers **every** rulebook in the repository and offers all five when you create
-an activation ([03 §2.12](03-aap-eda-setup.md)). Nothing filters the list, and two of the five must
-**never** be attached to an activation.
+Your EDA project discovers **every** rulebook in the repository and offers all of them when you
+create an activation ([03 §2.12](03-aap-eda-setup.md)). Nothing filters the list, so check this table
+before you pick one. Two must never be attached, and one is a temporary experiment that is attached
+today and should be removed when it is finished.
 
 | File | Status | Why |
 |---|---|---|
 | `team_a_rulebook.yml` | ✅ live | Team A, three record types |
 | `team_b_rulebook.yml` | ✅ live | Team B, three record types |
 | `team_c_rulebook.yml` | ✅ live | Team C, incident and problem only |
+| `shared_all_teams_rulebook.yml` | ⚠️ **attached, temporary** | **An experiment, not part of the live design.** One rulebook routing every team from a payload field, built on 2026-10-08 to measure the single-rulebook option against the per-team one. It is attached to its own activation and its own shared stream, so it does not touch the three live teams. Its write-back flags are deliberately `false`, so it cannot close or resolve a record. **Delete the file, the activation and the stream once the comparison is recorded** |
 | `catchall_debug_rulebook.yml` | 🔴 **never attach** | **Matches every event on purpose.** Attach it to an activation sharing a stream and it double-launches every job |
 | `my_eda_rulebook.yml` | 🔴 **never attach as-is** | **Reference only, kept deliberately** — the single-stream, single-team shape, for anyone who wants *one* rulebook rather than one per team. Inert as shipped: retired `event_type` values, a job template and organization that do not exist, and two `<...>` placeholders. Its header comment lists the four things to change |
 
@@ -257,7 +259,55 @@ an activation ([03 §2.12](03-aap-eda-setup.md)). Nothing filters the list, and 
 
 ---
 
-## 6. Test a rulebook without AAP
+## 6. 🔴 Rule order decides the outcome
+
+**By default a ruleset stops at the first rule that matches an event.** The rules below it are not
+evaluated for that event at all. This is the single most important thing to know before you add a
+rule to an existing rulebook, because the failure it causes is silent.
+
+Two terms first:
+
+- **Rule** — one `name`, one `condition`, one `action`, inside a ruleset's `rules:` list. The order
+  they appear in the file is the order they are evaluated in.
+- **Catch-all rule** — a rule whose condition matches anything, such as `event.payload is defined`.
+  Used as a deliberate last resort, to notice events that no real rule wanted.
+
+### 6.1 What was measured
+
+Measured on 2026-10-08 with [`local-test/rulebook_rule_order.yml`](../local-test/rulebook_rule_order.yml),
+which you can re-run yourself in about ten seconds — see §7 for the harness, or the header comment in
+that file for the exact command.
+
+| Ruleset in that file | Setup | Result |
+|---|---|---|
+| `RULESET-DEFAULT` | catch-all **last**, default evaluation | 4 events produced **4** rule firings. Each team event fired only its own rule; the unroutable event fired only the catch-all |
+| `RULESET-MATCH-MULTIPLE` | catch-all last, `match_multiple_rules: true` | the same 4 events produced **7** firings. Each routable event fired its own team rule **and** the catch-all |
+| `RULESET-CATCHALL-FIRST` | catch-all **first**, default evaluation | 3 team events produced **3** firings, **all of them the catch-all. No team rule fired at all** |
+
+> ✅ **Verify:** 14 `FIRED` lines in total, split 4, 7 and 3. The three rulesets run at the same time,
+> so the lines arrive interleaved — sort them before counting.
+
+### 6.2 The two rules this gives you
+
+1. **Put a catch-all last, always.** Put it first and it absorbs every event. No team rule runs, and
+   **nothing reports an error**, because the catch-all did handle the event. Under a shared rulebook
+   that is every team broken by the position of one line.
+2. **Make conditions mutually exclusive rather than relying on order.** First-match is a backstop,
+   not a routing mechanism. If two rules can match the same event, which one wins is a property of
+   the file's layout — which is not where routing logic should live.
+
+> ⚠️ **A rule that stops firing after someone edits the rulebook is usually this.** Not a broken
+> condition, not a stream problem, not a token problem — a new rule above it that also matches. §8
+> lists the other causes; check this one first, because it is the only one that leaves no trace.
+
+> ℹ️ **`match_multiple_rules` is a per-ruleset setting, not a global one.** Turning it on also makes
+> the engine hold matched events for the ruleset's `default_events_ttl`, two hours by default, so
+> later rules can still see them. The upstream documentation flags that as a memory cost. This repo
+> does not set it anywhere, so every rulebook here is first-match.
+
+---
+
+## 7. Test a rulebook without AAP
 
 A condition change takes seconds to check locally and minutes to check in AAP.
 [`local-test/rulebook_logic_only.yml`](../local-test/rulebook_logic_only.yml) is a ready-made
@@ -272,7 +322,7 @@ Full instructions: [07 §1](07-end-to-end-test.md).
 
 ---
 
-## 7. When a rule is not firing
+## 8. When a rule is not firing
 
 In the order that resolves fastest:
 

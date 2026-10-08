@@ -439,6 +439,22 @@ one of each object instead of one per team, and **every team is affected at once
 6. Re-test **one** team immediately ([07 §2](07-end-to-end-test.md)). Because one token now serves
    every stream, one team passing means they all have the right value.
 
+> ✅ **Rotation restarts nothing, and it is not an outage.** Measured 2026-10-08: the credential was
+> changed while all four activations kept running, and the processes serving events afterwards were
+> the same ones, started hours earlier, with no restart recorded against any of them. You do **not**
+> deactivate the activation, detach the event stream, re-add it, save and reactivate. That cycle is
+> for a **rulebook** change ([03 §2.9](03-aap-eda-setup.md)), because an activation loads the
+> rulebook into its running process. It never loads the token: the token is checked where events
+> arrive, before anything reaches an activation. So the cost of a rotation is the brief window in
+> step 3 where the two sides disagree — not downtime.
+
+> ℹ️ **Why the token is stored bare, mechanically.** The ServiceNow API Key credential has a
+> separate **API Key Prefix** field alongside the key itself, and on this instance that prefix field
+> is empty. A scheme word such as `Bearer` belongs in the prefix field, not in the key — which is
+> exactly why the key must be the 64 characters on their own. Confirmed by reading the live record
+> on 2026-10-08. Note the ServiceNow reference page for this credential type documents neither the
+> prefix field nor the header-name field, so you will not find this explained there.
+
 > 🔴 **Never rotate "just one team" on this design.** There is only one credential object behind all
 > of the streams, so changing it changes every team. If you need to rotate one team in isolation, you
 > are asking for option A and should move that team onto its own credential first.
@@ -450,6 +466,42 @@ one of each object instead of one per team, and **every team is affected at once
 > ⚠️ **Read the field back after saving it, on both sides.** A write that silently does nothing looks
 > exactly like a write that worked; see the warning in
 > [design decisions §1.5](design-decisions.md#15-tokens-one-per-stream-by-default-or-one-shared--a-real-choice).
+
+---
+
+### 4.2 Temporary objects in the sandbox — what they are and when to remove them
+
+If you open the sandbox and find more objects than the three teams account for, these are why. All
+of them were created on 2026-10-08 to measure the single-rulebook option against the per-team one,
+and all of them are **temporary**. None of them touches the three live teams.
+
+| Object | Where | What it is |
+|---|---|---|
+| `sn-shared` | Automation Decisions → Event Streams | The one shared stream the single-rulebook experiment posts to. Uses the same credential as the three team streams |
+| `shared-all-teams-optiona` | Automation Decisions → Rulebook Activations | The experiment's own activation, running `shared_all_teams_rulebook.yml`. Separate from the three team activations, which are untouched |
+| `eda_team_a_launcher` | Access Management → Users | A **non-administrative** account holding `Organization Execute` on one organization only. Created to measure what a team-scoped launching account can and cannot reach. Its password is in the macOS Keychain under `sandbox-aap-team-a-launcher` |
+
+> ℹ️ **Why a separate activation rather than repointing an existing one.** The three team activations
+> are the live per-team design, and the experiment needed to run beside them rather than replace
+> them, so both could be compared on the same platform on the same day. An activation is a pod, so
+> the cost of keeping both is one extra pod ([design decisions §1.6](design-decisions.md)).
+
+**To remove them when the comparison is finished**, in this order:
+
+1. Disable and delete the activation `shared-all-teams-optiona`.
+2. Delete the event stream `sn-shared`.
+3. Delete `rulebooks/shared_all_teams_rulebook.yml` from the repository and sync the project.
+4. Delete the user `eda_team_a_launcher`, and its role assignment goes with it.
+5. Remove the Keychain item:
+
+   ```bash
+   security delete-generic-password -a "$USER" -s sandbox-aap-team-a-launcher
+   ```
+
+   Expected output: a line beginning `password has been deleted.`
+
+> ⚠️ **Do not delete the three per-team objects while tidying up.** The names are similar enough to
+> confuse: `sn-shared` is the experiment, `sn-team-a`, `sn-team-b` and `sn-team-c` are live.
 
 ---
 
