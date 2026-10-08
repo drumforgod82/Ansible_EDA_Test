@@ -1,0 +1,129 @@
+---
+# Proves how rule order and match_multiple_rules behave, in about ten seconds,
+# with no AAP and no ServiceNow. Referenced by docs/rulebook-anatomy.md §6.
+#
+# Run it:
+#   cd /path/to/eda-local-test          # the harness with the venv
+#   export JAVA_HOME="/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home"
+#   export PATH="${PWD}/.venv/bin:${JAVA_HOME}/bin:${PATH}"
+#   export ANSIBLE_COLLECTIONS_PATH="${PWD}/collections"
+#   ./.venv/bin/ansible-rulebook \
+#     -r /path/to/Ansible_EDA_Test/local-test/rulebook_rule_order.yml \
+#     -i inventory.yml 2>&1 | grep '^FIRED'
+#
+# Expected: 14 FIRED lines in total, made up of
+#   RULESET-DEFAULT          4 events -> 4 lines   one rule per event
+#   RULESET-MATCH-MULTIPLE   4 events -> 7 lines   team rule AND catch-all
+#   RULESET-CATCHALL-FIRST   3 events -> 3 lines   catch-all only, no team rule
+# The three rulesets run concurrently, so the lines arrive interleaved. Sort
+# or group them before counting.
+#
+# Nothing here launches a job: every action is `debug`, so there is no
+# run_job_template and no credential of any kind.
+
+- name: RULESET-DEFAULT
+  hosts: all
+  # match_multiple_rules deliberately omitted so the default applies.
+  sources:
+    - ansible.eda.generic:
+        payload:
+          - meta: {eda_event_stream_name: sn-shared}
+            payload: {test_id: A1-team-a, target_team: team_a}
+          - meta: {eda_event_stream_name: sn-shared}
+            payload: {test_id: A2-team-b, target_team: team_b}
+          - meta: {eda_event_stream_name: sn-shared}
+            payload: {test_id: A3-team-c, target_team: team_c}
+          - meta: {eda_event_stream_name: sn-shared}
+            payload: {test_id: A4-unroutable}
+  rules:
+    - name: route-team-a
+      condition: event.payload.target_team == "team_a"
+      action:
+        debug:
+          msg: "FIRED|RULESET-DEFAULT|route-team-a|{{ event.payload.test_id }}"
+    - name: route-team-b
+      condition: event.payload.target_team == "team_b"
+      action:
+        debug:
+          msg: "FIRED|RULESET-DEFAULT|route-team-b|{{ event.payload.test_id }}"
+    - name: route-team-c
+      condition: event.payload.target_team == "team_c"
+      action:
+        debug:
+          msg: "FIRED|RULESET-DEFAULT|route-team-c|{{ event.payload.test_id }}"
+    # Last on purpose. It also matches every routable event, which is the point.
+    - name: catch-all
+      condition: event.payload is defined
+      action:
+        debug:
+          msg: "FIRED|RULESET-DEFAULT|catch-all|{{ event.payload.test_id | default('none') }}"
+
+- name: RULESET-MATCH-MULTIPLE
+  hosts: all
+  match_multiple_rules: true
+  sources:
+    - ansible.eda.generic:
+        payload:
+          - meta: {eda_event_stream_name: sn-shared}
+            payload: {test_id: B1-team-a, target_team: team_a}
+          - meta: {eda_event_stream_name: sn-shared}
+            payload: {test_id: B2-team-b, target_team: team_b}
+          - meta: {eda_event_stream_name: sn-shared}
+            payload: {test_id: B3-team-c, target_team: team_c}
+          - meta: {eda_event_stream_name: sn-shared}
+            payload: {test_id: B4-unroutable}
+  rules:
+    - name: route-team-a
+      condition: event.payload.target_team == "team_a"
+      action:
+        debug:
+          msg: "FIRED|RULESET-MATCH-MULTIPLE|route-team-a|{{ event.payload.test_id }}"
+    - name: route-team-b
+      condition: event.payload.target_team == "team_b"
+      action:
+        debug:
+          msg: "FIRED|RULESET-MATCH-MULTIPLE|route-team-b|{{ event.payload.test_id }}"
+    - name: route-team-c
+      condition: event.payload.target_team == "team_c"
+      action:
+        debug:
+          msg: "FIRED|RULESET-MATCH-MULTIPLE|route-team-c|{{ event.payload.test_id }}"
+    - name: catch-all
+      condition: event.payload is defined
+      action:
+        debug:
+          msg: "FIRED|RULESET-MATCH-MULTIPLE|catch-all|{{ event.payload.test_id | default('none') }}"
+
+# The failure mode. Same rules, default evaluation, catch-all moved to the top.
+- name: RULESET-CATCHALL-FIRST
+  hosts: all
+  sources:
+    - ansible.eda.generic:
+        payload:
+          - meta: {eda_event_stream_name: sn-shared}
+            payload: {test_id: C1-team-a, target_team: team_a}
+          - meta: {eda_event_stream_name: sn-shared}
+            payload: {test_id: C2-team-b, target_team: team_b}
+          - meta: {eda_event_stream_name: sn-shared}
+            payload: {test_id: C3-team-c, target_team: team_c}
+  rules:
+    - name: catch-all
+      condition: event.payload is defined
+      action:
+        debug:
+          msg: "FIRED|RULESET-CATCHALL-FIRST|catch-all|{{ event.payload.test_id | default('none') }}"
+    - name: route-team-a
+      condition: event.payload.target_team == "team_a"
+      action:
+        debug:
+          msg: "FIRED|RULESET-CATCHALL-FIRST|route-team-a|{{ event.payload.test_id }}"
+    - name: route-team-b
+      condition: event.payload.target_team == "team_b"
+      action:
+        debug:
+          msg: "FIRED|RULESET-CATCHALL-FIRST|route-team-b|{{ event.payload.test_id }}"
+    - name: route-team-c
+      condition: event.payload.target_team == "team_c"
+      action:
+        debug:
+          msg: "FIRED|RULESET-CATCHALL-FIRST|route-team-c|{{ event.payload.test_id }}"

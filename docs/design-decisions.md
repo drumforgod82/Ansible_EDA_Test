@@ -75,7 +75,7 @@ Several notes in this repository refer to it, so here is what it is:
 
 > 🔴 **While it exists, never attach `catchall_debug_rulebook.yml` to a production activation.** It
 > matches every event on purpose. See
-> [Rulebook anatomy §5](rulebook-anatomy.md#5--two-rulebooks-in-this-repo-must-not-be-attached--leave-them-alone).
+> [Rulebook anatomy §5](rulebook-anatomy.md#5--not-every-rulebook-here-is-safe-to-attach).
 
 ### 1.4 This is our decision, not Red Hat's recommendation
 
