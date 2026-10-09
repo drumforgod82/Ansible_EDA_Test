@@ -10,6 +10,10 @@
 # Any edit to this file changes the SHA the source mapping is pinned to, so the
 # cycle for every change is:
 #   push -> sync the EDA project -> re-attach the event stream -> restart
+# That cycle is now scripted: scripts/eda_apply_rulebook_change.py does all of it
+# over the API in about 40 seconds. Events that arrive while the activation is
+# down are accepted with HTTP 200 and then silently discarded, so the length of
+# the window is the size of the data-loss hole. Keep it short.
 # See team_a_rulebook.yml for why this name must not name a single record type.
 - name: Team C - ServiceNow event automation
   hosts: all
