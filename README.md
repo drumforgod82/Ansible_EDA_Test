@@ -159,6 +159,7 @@ one needs, and which to run when. If nothing is installed on your computer yet, 
 |---|---|
 | [`verify_team.py`](scripts/verify_team.py) | **Read-only.** Checks the repo, AAP and ServiceNow for one team — including the route row's `event_stream_uuid` against the real AAP stream UUID, and the activation's pinned `rulebook_hash` against the rulebook at the project's synced revision. Record-type aware: a type the team's rulebook does not mention reports `SKIP`, not `FAIL`. Exits non-zero on failure; `--json` for CI |
 | [`provision_team.py`](scripts/provision_team.py) | Builds a new team's AAP objects and renders its rulebook. **Dry run by default** — `--apply` is required to write. Idempotent, records a manifest, and `--destroy` removes exactly what it made |
+| [`eda_apply_rulebook_change.py`](scripts/eda_apply_rulebook_change.py) | Makes a rulebook edit take effect: syncs the EDA project, rewrites the activation's source mapping and restarts it, in about 40 seconds instead of six clicks. **Dry run by default** — `--apply` is required; `--list` is read-only. Measured findings and the data-loss warning are in [08 §6](docs/08-routine-ops.md#6-apply-a-rulebook-change) |
 
 > ℹ️ **Build your first team by hand** ([08 §2](docs/08-routine-ops.md)). The script removes four
 > silent failure modes *by construction*, which is exactly why a successful scripted run teaches you
@@ -194,7 +195,8 @@ one needs, and which to run when. If nothing is installed on your computer yet, 
 │   └── inventory.yml
 ├── scripts/
 │   ├── verify_team.py
-│   └── provision_team.py
+│   ├── provision_team.py
+│   └── eda_apply_rulebook_change.py
 ├── docs/
 │   ├── 00-workstation-setup.md                  # your computer: macOS, Windows 11, Linux
 │   ├── 01-provision-aap.md  …  10-troubleshooting.md     # the build sequence

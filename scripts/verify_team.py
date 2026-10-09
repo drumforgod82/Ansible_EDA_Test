@@ -515,13 +515,20 @@ def check_source_mapping_fresh(
     """Check the activation's source mapping still matches the rulebook the project synced.
 
     An activation's ``source_mappings`` pins a ``rulebook_hash``, which is the plain SHA-256 of the
-    rulebook file's bytes (verified against a live activation). Editing the rulebook changes that
-    hash, so after push -> project sync the stored mapping refers to a rulebook that no longer
-    exists and the activation fails with "Rulebook has changed since the sources were mapped."
+    rulebook file's bytes (verified against a live activation).
 
-    The fix is to re-attach the event stream (the gear icon) and restart -- but nothing warns you
-    the mapping is stale while the activation is still happily running on the old revision. This is
-    the check for that.
+    What this check is really for: an activation still running the *old* revision of a rulebook you
+    have already changed. Nothing tells you that from the UI.
+
+    It is **not** evidence that events are failing. Measured 2026-10-09: a project sync rewrites the
+    stored hash itself, so an ordinary edit does not leave the mapping stale, and events kept
+    routing normally both before and after the restart. A genuinely wrong hash does stop the
+    activation -- it refuses to start rather than misrouting -- but an edit no longer produces one.
+    See docs/design-decisions.md section 2.1.
+
+    The fix is a project sync and a restart, which
+    ``scripts/eda_apply_rulebook_change.py`` does over the API; re-attaching the event stream by
+    hand additionally clears AAP's "update source mappings" flag.
 
     Compared against the file at the EDA project's *synced* revision, not the working tree: an
     uncommitted local edit is not what AAP is running and must not be reported as drift.
@@ -563,9 +570,10 @@ def check_source_mapping_fresh(
         "source mapping matches the synced rulebook (not stale)",
         f"mapping pins  {pinned}\n"
         f"rulebook is   {actual}\n"
-        f"at project revision {git_hash[:12]}. The rulebook changed after the stream was mapped:\n"
-        "re-attach the event stream on the activation (gear icon) and restart it, or the next\n"
-        'event fails with "Rulebook has changed since the sources were mapped."',
+        f"at project revision {git_hash[:12]}. The rulebook changed after the stream was mapped,\n"
+        "so this activation may still be running the old revision. Apply it with:\n"
+        "  python3 scripts/eda_apply_rulebook_change.py --activation <name> --sync --apply\n"
+        "Events are not failing meanwhile -- see docs/design-decisions.md section 2.1.",
     )
 
 

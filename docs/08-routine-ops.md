@@ -1,7 +1,7 @@
 # 08 — Routine operations
 
-**This document covers the four jobs you do repeatedly once the pipeline works: enrolling an item,
-adding a team, adding a record type, and rotating a token.**
+**This document covers the five jobs you do repeatedly once the pipeline works: enrolling an item,
+adding a team, adding a record type, rotating a token, and applying a rulebook change.**
 
 > **Previous stage:** [07 — End-to-end test](07-end-to-end-test.md) · **Next:**
 > [10 — Troubleshooting](10-troubleshooting.md) is the reference you will reach for from here on;
@@ -21,6 +21,7 @@ adding a team, adding a record type, and rotating a token.**
 | Add a team | Occasionally | ~45 minutes across Git, AAP and ServiceNow | [§2](#2-add-a-team) |
 | Add a record type | Rarely | Several hours | [§3](#3-add-a-record-type) |
 | Rotate a token | On a schedule, or after exposure | Two edits | [§4](#4-rotate-an-event-stream-token) |
+| Apply a rulebook change | Every time you edit a rulebook | One command, about 40 seconds | [§6](#6-apply-a-rulebook-change) |
 
 ---
 
@@ -606,6 +607,225 @@ differs, and `--json` for machine-readable output.
 
 ---
 
+## 6. Apply a rulebook change
+
+**This section covers what to do after you edit a rulebook, using one script instead of six clicks.**
+
+A **rulebook** is the YAML file that says "when this kind of event arrives, run that job template".
+A **rulebook activation** is the always-running process in AAP that reads one rulebook and watches
+for events. An **event stream** is the web address that ServiceNow posts events to.
+
+Here is the thing that surprises everyone: **editing a rulebook and pushing it changes nothing.**
+The activation is already running, and it keeps using the copy of the rulebook it started with. It
+picks up your edit only when it is stopped and started again.
+
+### 6.1 What you need before you start
+
+If you have never set this machine up, start at
+[00 — Set up your own computer](00-workstation-setup.md) and come back here.
+
+| What | Why you need it |
+|---|---|
+| Your rulebook edit **merged to `main` and pushed** | AAP reads the rulebook from GitHub, not from your laptop. An unpushed edit cannot be picked up |
+| `AAP_GATEWAY` set | Tells the script which AAP to talk to |
+| `AAP_TOKEN` set | Proves to AAP that it is you |
+| Python 3.9 or newer, and PyYAML | The script is written in Python. See [scripts/README.md §2](../scripts/README.md) |
+
+Check the two variables are set before you run anything. From any directory:
+
+```bash
+echo "gateway: ${AAP_GATEWAY:-NOT SET}"
+echo "token length: ${#AAP_TOKEN}"
+```
+
+Expected output: a web address, then a number larger than zero.
+
+```
+gateway: https://<your-aap-host>
+token length: 30
+```
+
+If either says `NOT SET` or `0`, go back to
+[00 §4](00-workstation-setup.md#4-tell-the-tools-how-to-reach-aap-and-servicenow) and set them.
+
+### 6.2 Find the activation you need to change
+
+Run this first. It only reads; it changes nothing:
+
+```bash
+cd ~/Ansible_EDA_Test
+python3 scripts/eda_apply_rulebook_change.py --list
+```
+
+Expected output, with your own activation names:
+
+```
+  ID  ACTIVATION        ORGANIZATION  STATUS     FLAGGED  STREAMS
+-----------------------------------------------------------------
+   3  team-a-incidents  Team A        running    yes      sn-team-a
+   4  team-b-incidents  Team B        running    yes      sn-team-b
+   5  team-c-incidents  Team C        running    no       sn-team-c
+
+3 activation(s), 2 flagged (...).
+```
+
+The **FLAGGED** column shows which activations are carrying AAP's message *"Rulebook content has
+changed since event stream sources were mapped."* See [§6.5](#65-what-flagged-really-means) for what
+that does and does not mean — it is **not** proof that a team is broken.
+
+Note the **ID** of the activation whose rulebook you changed. You will use it in the next step.
+
+### 6.3 Preview the change
+
+The script changes nothing unless you add `--apply`, so run it once without that first:
+
+```bash
+cd ~/Ansible_EDA_Test
+python3 scripts/eda_apply_rulebook_change.py --activation team-c-incidents
+```
+
+Replace `team-c-incidents` with your own activation name. If the name is used in more than one
+organization, the script stops and lists the candidates — use `--activation-id 5` instead, with the
+ID from §6.2.
+
+Expected output ends with this, which means "nothing to do":
+
+```
+  mapping already correct: True
+Nothing to do: mapping is current, no warnings, activation running.
+Pass --force to run the cycle anyway.
+```
+
+Or this, which means there is work to do:
+
+```
+[dry run] re-run with --apply to disable, PATCH the mapping, and re-enable.
+```
+
+### 6.4 Apply it
+
+> 🔴 **Events that arrive while this runs are lost, and the sender is told they succeeded.**
+> Measured: an event posted while the activation is stopped returns `HTTP 200`, the event stream's
+> counter goes up, and the event reaches nothing and is never replayed. See
+> [§6.6](#66-the-window-is-silent-data-loss) before running this on anything people depend on.
+
+1. Run the script with `--sync` and `--apply`:
+
+   ```bash
+   cd ~/Ansible_EDA_Test
+   python3 scripts/eda_apply_rulebook_change.py \
+     --activation team-c-incidents --sync --apply
+   ```
+
+   `--sync` tells AAP to fetch the latest rulebook from GitHub first. Without it, AAP restarts the
+   activation on whatever it fetched last time, which may not include your edit.
+
+2. Read the output. A successful run looks like this:
+
+   ```
+     project 4 sync requested (HTTP 202)
+     sync completed after 5s at daa6b78fd2c6
+   APPLYING. Events arriving from now until 'running' below are lost silently.
+     disable -> HTTP 204
+     status=stopped after 10s
+     PATCH -> HTTP 200
+     enable -> HTTP 204
+     status=running after 25s
+     data-loss window: 43s
+     warnings=[]
+   OK
+   ```
+
+   The last line is `OK` and `warnings=[]` is empty. Anything else means it did not finish — the
+   script prints the reason and puts the mapping back as it found it.
+
+3. Confirm the activation is running the revision you expect:
+
+   ```bash
+   python3 scripts/eda_apply_rulebook_change.py --list
+   ```
+
+   Expected output: your activation shows `running` and `no` in the FLAGGED column.
+
+> ℹ️ **To prove an event still gets through, add `--probe`.** It posts a deliberately
+> *non-matching* test event, so nothing launches and no real record is touched, then checks the
+> activation's own log to confirm the event arrived. It needs the event stream token in
+> `EDA_STREAM_TOKEN`:
+>
+> ```bash
+> export EDA_STREAM_TOKEN="$(security find-generic-password -a "$USER" -s sandbox-eda-team-a -w)"
+> python3 scripts/eda_apply_rulebook_change.py \
+>   --activation team-c-incidents --sync --apply --probe
+> ```
+>
+> Expected extra output: `probe routed to the activation: True`. On this lab the shared token lives
+> in the `sandbox-eda-team-a` Keychain item — see the warning in
+> [§4.1](#41-shared-token-rotation--the-path-this-lab-is-on-since-2026-10-08) about the other
+> per-team items being stale.
+
+### 6.5 What FLAGGED really means
+
+Measured on 2026-10-09, and it is not what the message says.
+
+When you sync a project after editing a rulebook, AAP does **two** things at once:
+
+- It **updates the stored `rulebook_hash` itself.** The mapping is not left stale. Measured: the
+  rulebook changed from hash `b2574fed…` to `a38082c1…`, and the activation's `source_mappings`
+  showed the new hash without anyone touching it.
+- It **sets the flag anyway**, asking you to update the mapping that it has already updated.
+
+So the message *"Please update source mappings"* describes work that is already done. What the flag
+actually marks is "this rulebook changed under a running activation". Two consequences:
+
+- **A flagged activation is not a broken activation.** Measured: events routed to the rule engine
+  normally with the flag set, both before and after the restart.
+- **Restarting alone clears the problem but not the flag.** Measured: a plain stop and start loaded
+  the new rulebook — the new instance reported the new Git revision — while the flag stayed set.
+  Only rewriting `source_mappings` clears it, which is what this script does.
+
+> ⚠️ **Only the activation's own detail page reports the flag.** The list of all activations returns
+> an empty value for it and does not work it out. So a check written against the list will report a
+> healthy estate no matter how many activations are flagged. The script reads each activation
+> individually for exactly this reason.
+
+### 6.6 The window is silent data loss
+
+Measured on 2026-10-09, three times, with a working control either side.
+
+An event stream reaches an activation over a PostgreSQL **`LISTEN`/`NOTIFY`** channel — a messaging
+feature where a sender announces a message and only processes currently listening receive it. There
+is no queue. A message announced while nothing is listening is discarded, not stored.
+
+A stopped activation is not listening. So an event posted during the window:
+
+- returns **`HTTP 200`** to the sender, which reads as success
+- **increments the event stream's counter**, so the counter cannot tell you it was lost
+- reaches no rulebook, and is **never replayed** when the activation comes back
+
+| Event posted while the activation is… | Sender sees | Arrived in the activation's log? |
+|---|---|---|
+| running | `HTTP 200` | Yes |
+| **stopped** | **`HTTP 200`** | **No, and never afterwards** |
+| running again | `HTTP 200` | Yes |
+
+> 🔴 **`enable_persistence` does not fix this, despite the name.** Switching it on is refused unless
+> you supply a rule engine credential, and the credential type describes itself as *"Credential for
+> EDA Rule Engine persistence. This uses the Postgres DB Credential."* It gives the **rule engine** a
+> database for its own state. The loss happens before the rule engine is involved, where nothing is
+> listening at all, so there is nothing for it to preserve.
+
+What you can do about it, in order of preference:
+
+- **Pause the sender** for the length of the window, and let the records queue in ServiceNow.
+- **Pick a quiet period.** The window is short but it is not zero.
+- **Reconcile afterwards** by querying ServiceNow for records in the window that have no work note
+  from the automation.
+
+The script prints the window it actually measured on every run, so you always know how big the hole
+was rather than guessing.
+
+---
+
 ## Checkpoint — after adding a team
 
 - [ ] The new rulebook parses, and a `grep` for the copied team's name returns nothing
@@ -634,3 +854,19 @@ command printing nothing usually reads as a command that did not run.
 name in §2.2 is dangerous even though nothing breaks: it corrupts the evidence the isolation test
 relies on, so the test passes while telling you about the wrong team. That is spelled out rather than
 left as "keep names tidy".
+
+**And for §6 specifically.** The prerequisite a beginner is most likely to miss is that the edit has
+to be **pushed and merged to `main`** — AAP reads GitHub, not your laptop — so that is the first row
+of §6.1 with a reason attached, and `--sync` is explained where it is used rather than left as a
+flag. Every command states its directory and its expected output, and the outputs shown are real
+runs rather than invented. The two counter-intuitive facts are given their own sections instead of
+footnotes, because both invert what the interface tells you: a FLAGGED activation is usually fine
+(§6.5), and a successful `HTTP 200` can mean the event was thrown away (§6.6). The terms *rulebook*,
+*rulebook activation*, *event stream*, *source mapping* and `LISTEN`/`NOTIFY` are each defined where
+first used and in the [Glossary](glossary.md).
+
+**What §6 does not cover, stated rather than implied.** Every measurement behind it used a
+**comment-only** rulebook change, so the rulebook's `sources:` block was never altered. A change
+that adds, removes or renames a source may genuinely need the manual re-attach, and
+[design decisions §2.2](design-decisions.md#22-what-was-not-tested) says so in the same terms rather
+than leaving the reader to assume the scripted path always applies.

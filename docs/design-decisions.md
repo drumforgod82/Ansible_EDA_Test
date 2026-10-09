@@ -285,9 +285,56 @@ activation's `source_mappings`. `scripts/verify_team.py` does this comparison fo
 > running.
 
 > ⚠️ **There is no content normalisation — whitespace counts.** A single trailing newline produces a
-> different hash and invalidates the mapping. So reformatting a rulebook, or an editor that silently
-> appends a final newline on save, costs the full re-attach cycle even though nothing functional
-> changed.
+> different hash. So reformatting a rulebook, or an editor that silently appends a final newline on
+> save, costs a sync and a restart even though nothing functional changed.
+
+### 2.1 What a rulebook edit actually costs — measured 2026-10-09
+
+The paragraphs above describe the hash correctly. The *consequence* needed narrowing, because a real
+rulebook edit was pushed, synced and restarted end to end to find out. A comment-only change was
+used, so the rulebook's **sources were not altered** — that limit matters, and
+[§2.2](#22-what-was-not-tested) says why.
+
+What happened, in order:
+
+1. **The sync rewrote the stored hash by itself.** The rulebook changed from `b2574fed…` to
+   `a38082c1…`, and the activation's `source_mappings` showed `a38082c1…` with no manual
+   re-attach. **The mapping is not left stale by an edit**, which is the premise the "you must
+   re-attach" advice rests on.
+2. **The sync updated the rulebook record in place.** Same `rulebook_id`, still one row for that
+   filename in that project. An activation does **not** need repointing at a new rulebook id. Note
+   that `modified_at` on the rulebook did *not* change, so it cannot be used to detect an edit.
+3. **The running activation kept the old rulebook**, exactly as documented — the project sat at the
+   new Git revision while the running instance still reported the old one.
+4. **A plain stop and start picked up the new rulebook.** The new instance reported the new Git
+   revision. **No event stream re-attach was required for the edit to take effect.**
+5. **The flag survived that restart.** AAP still reported *"Rulebook content has changed since event
+   stream sources were mapped"* even though the hash was correct and the new rulebook was loaded.
+   Rewriting `source_mappings` is what clears it.
+6. **Events routed correctly at every step** — including while the flag was set, and before the
+   restart on the old rulebook.
+
+So the required cycle is **sync → restart**. Re-attaching the event stream clears a flag; it is not
+what makes the edit live. `scripts/eda_apply_rulebook_change.py` does both over the API in about 40
+seconds and is documented in
+[08 §6](08-routine-ops.md#6-apply-a-rulebook-change).
+
+**The failure in the error text above is real, and still reachable.** Writing a deliberately wrong
+`rulebook_hash` into the mapping was accepted by the API with `HTTP 200`, and the activation then
+**refused to start**: `enable` returned `HTTP 400` and the activation went to `error`, routing
+nothing. So a genuinely stale hash does stop the activation — it fails closed and loudly, rather
+than misrouting quietly. What changed is that an ordinary edit no longer produces that state,
+because step 1 above fixes the hash for you.
+
+### 2.2 What was not tested
+
+The change used above was **a comment only**, so the rulebook's `sources:` block was untouched and
+the existing `__SOURCE_1` mapping stayed meaningful.
+
+A rulebook edit that **adds, removes or renames a source** is a different case and was not
+measured. There the source-to-stream binding itself — not just the hash — may genuinely need
+rebuilding, and the re-attach advice may hold exactly as originally written. Treat a change to a
+`sources:` block as requiring the manual re-attach until somebody measures it.
 
 > ⚠️ **Automation Execution and Automation Decisions sync independently**, even pointing at the same
 > Git URL. So the controller project and the EDA project can sit at two *different* revisions of the
