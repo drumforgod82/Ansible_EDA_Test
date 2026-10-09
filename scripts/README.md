@@ -1,7 +1,8 @@
-# The two Python tools
+# The three Python tools
 
-This page explains what `verify_team.py` and `provision_team.py` are for, what must be true before
-you run either, and where the step-by-step procedures live — it is a signpost, not a manual.
+This page explains what `verify_team.py`, `provision_team.py` and `eda_apply_rulebook_change.py`
+are for, what must be true before you run them, and where the step-by-step procedures live — it is a
+signpost, not a manual.
 
 **Nothing installed yet?** Start at
 [00 — Set up your own computer](../docs/00-workstation-setup.md), which covers macOS, Windows 11 and
@@ -24,6 +25,7 @@ Ansible is and what this pipeline does. Every term used below is defined in
 |---|---|---|
 | `verify_team.py` | **No — read-only.** GETs only; never writes to AAP, ServiceNow or Git | Checks one team's wiring across the repository, AAP and ServiceNow, and asserts the things a human eyeball misses. Run it before testing with a real record |
 | `provision_team.py` | **Only with `--apply`.** Dry run by default | Builds a new team's AAP objects and renders its rulebook from an existing team's. Records a manifest, so `--destroy` removes exactly what it made and nothing else |
+| `eda_apply_rulebook_change.py` | **Only with `--apply`.** Dry run by default | Makes a rulebook edit take effect: syncs the project, rewrites the activation's stream mapping and restarts it. Replaces a six-step sequence of clicks with one command. `--list` is read-only |
 
 **Where the procedures are.** This page deliberately does not repeat the commands, so there is only
 one copy to keep correct:
@@ -31,6 +33,9 @@ one copy to keep correct:
 - Provisioning a team — [08 §2](../docs/08-routine-ops.md), including the by-hand path and the
   scripted one side by side.
 - Verifying a team — [08 §5](../docs/08-routine-ops.md).
+- Applying a rulebook change — [08 §6](../docs/08-routine-ops.md#6-apply-a-rulebook-change),
+  written step by step for someone who has never done it. **Start there** if you have just edited a
+  rulebook and nothing has happened.
 
 > 🔴 **Read the token-scheme warning at the top of [08 §2](../docs/08-routine-ops.md) before
 > provisioning anything on this instance.** Both scripts build the scheme the guides teach — one
@@ -99,15 +104,17 @@ Both scripts read their credentials from the environment and will stop with a cl
 is missing. Note that the two scripts use **different ServiceNow accounts on purpose** — verifying
 only needs to read, provisioning needs to write.
 
-| Variable | `verify_team.py` | `provision_team.py` | What it is |
-|---|---|---|---|
-| `SANDBOX_AAP_PAT_TOKEN` | required | required | An AAP personal access token. Provisioning also uses it as the EDA controller credential |
-| `AAP_GATEWAY` | required | required | Your AAP gateway base URL, e.g. `https://<your-aap-host>` — or pass `--gateway` |
-| `SN_PDI_HOST` | required | required | Your ServiceNow developer instance, e.g. `https://dev123456.service-now.com` |
-| `SN_PDI_USERNAME` | required | — | An account that can **read** the route table |
-| `SN_PDI_PASSWORD` | required | — | That account's password |
-| `SN_PDI_PROVISION_USERNAME` | — | required | An account that can **write** to the route table and the credential tables |
-| `SN_PDI_PROVISION_PASSWORD` | — | required | That account's password |
+| Variable | `verify_team.py` | `provision_team.py` | `eda_apply_rulebook_change.py` | What it is |
+|---|---|---|---|---|
+| `AAP_TOKEN` | — | — | required | An AAP personal access token. `SANDBOX_AAP_PAT_TOKEN` is accepted too, so an existing setup keeps working |
+| `SANDBOX_AAP_PAT_TOKEN` | required | required | accepted | An AAP personal access token. Provisioning also uses it as the EDA controller credential |
+| `AAP_GATEWAY` | required | required | required | Your AAP gateway base URL, e.g. `https://<your-aap-host>` — or pass `--gateway` |
+| `SN_PDI_HOST` | required | required | — | Your ServiceNow developer instance, e.g. `https://dev123456.service-now.com` |
+| `SN_PDI_USERNAME` | required | — | — | An account that can **read** the route table |
+| `SN_PDI_PASSWORD` | required | — | — | That account's password |
+| `SN_PDI_PROVISION_USERNAME` | — | required | — | An account that can **write** to the route table and the credential tables |
+| `SN_PDI_PROVISION_PASSWORD` | — | required | — | That account's password |
+| `EDA_STREAM_TOKEN` | — | — | only for `--probe` | An event stream token, used to post one non-matching test event after a change |
 
 > ⚠️ **A missing variable looks like a permissions problem.** If `provision_team.py` reaches the
 > ServiceNow section and fails in a way that reads like an access error, check the variable is
@@ -147,6 +154,21 @@ back up.
    writes nothing until you pass `--apply`.
 4. **When removing a team you provisioned** — `--destroy`, which uses the manifest from the original
    run, so it removes what that run created rather than guessing from names.
+5. **After you edit a rulebook and push it** — run `eda_apply_rulebook_change.py`. Nothing you
+   pushed is live until an activation is restarted, and this is what restarts it correctly. Start
+   with `--list`, which only reads:
+
+   ```bash
+   cd ~/Ansible_EDA_Test
+   python3 scripts/eda_apply_rulebook_change.py --list
+   ```
+
+   Expected output: one row per activation, with an `ID`, its organization, and a `FLAGGED` column.
+   Then follow [08 §6](../docs/08-routine-ops.md#6-apply-a-rulebook-change).
+
+   > 🔴 **Events that arrive while it runs are lost, and the sender is told they succeeded.** This
+   > is the one thing to understand before using it — [08 §6.6](../docs/08-routine-ops.md#66-the-window-is-silent-data-loss)
+   > explains why and what to do about it.
 
 ---
 

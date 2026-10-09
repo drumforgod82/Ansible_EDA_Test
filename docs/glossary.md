@@ -36,6 +36,10 @@
 | **Job template** | A saved, runnable configuration of a playbook in AAP. **Matched by exact name** from a rulebook |
 | **Activation** | A long-running container holding one rulebook, waiting for events. One per team |
 | **Event stream** | A URL plus a token that ServiceNow posts events to. One per team |
+| **Source mapping** | The record on an activation that says which **event stream** feeds which `sources:` entry in its rulebook. Pins a `rulebook_hash`, so it is tied to one exact revision of the rulebook file |
+| **`rulebook_hash`** | The plain SHA-256 of a rulebook file's bytes, stored inside a source mapping. Any byte change, including a trailing newline, produces a different one |
+| **Rule engine** | The component inside an activation that evaluates a rulebook's conditions against arriving events. Implemented with Drools, and the thing `enable_persistence` would give a database to |
+| **`LISTEN`/`NOTIFY`** | A PostgreSQL messaging feature where a sender announces a message and only processes *currently listening* receive it. There is no queue, so a message announced while nothing listens is discarded. This is how an event stream reaches an activation, and why a stopped activation loses events |
 | **Decision environment** | The container image an activation runs inside |
 | **Inventory** | The list of machines a playbook targets. Here it is just `localhost` |
 | **Collection** | A packaged bundle of Ansible content. `servicenow.itsm` is the one this project needs |
