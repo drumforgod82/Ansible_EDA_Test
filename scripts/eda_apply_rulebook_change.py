@@ -229,6 +229,21 @@ def rulebook_hash(aap: Aap, rulebook_id: int) -> str:
     return hashlib.sha256(rulesets.encode()).hexdigest()
 
 
+def declared_sources(aap: Aap, rulebook_id: int) -> list[str | None]:
+    """The sources a rulebook declares, in order. ``None`` where a source has no name.
+
+    Used only to refuse work this script cannot do correctly. A source entry is a single-key
+    mapping of plugin name to its arguments, optionally with a sibling ``name`` key, so the
+    source's name is that sibling rather than the plugin key.
+    """
+    rulesets = aap.get(f"/api/eda/v1/rulebooks/{rulebook_id}/")["rulesets"]
+    found: list[str | None] = []
+    for ruleset in yaml.safe_load(rulesets) or []:
+        for source in ruleset.get("sources") or []:
+            found.append(source.get("name") if isinstance(source, dict) else None)
+    return found
+
+
 def resolve_rulebook(aap: Aap, project_id: int, name: str) -> int:
     """Find the rulebook row for ``name`` in ``project_id``, preferring the newest.
 
@@ -370,13 +385,42 @@ def choose_interactively(rows: list[dict[str, Any]]) -> int:
         print(f"  not one of the listed ids: {sorted(valid)}")
 
 
-def build_mappings(existing: str, streams: list[dict], target_hash: str) -> str:
+def build_mappings(
+    existing: str,
+    streams: list[dict],
+    target_hash: str,
+    declared: list[str | None] | None = None,
+) -> str:
     """Rewrite the mapping with a fresh ``rulebook_hash``, preserving every other field.
 
     The source-to-stream binding is the part a human would recreate by removing and re-adding the
     event stream, and it is the part that must survive untouched -- only the hash is stale.
+
+    ``declared`` is the rulebook's current source list, and exists to make this function refuse
+    rather than guess. Refreshing the hash is only correct while the rulebook declares the same
+    sources the mapping was built against. If an edit **added** a source, the new source would
+    simply get no mapping row and this script would report success while leaving it unmapped --
+    a silent wrong answer, which is the one outcome worth hard-failing on. Removing or renaming a
+    source instead leaves a row naming a source that no longer exists, which the platform
+    refuses to start on, so that case fails loudly on its own.
     """
     parsed = yaml.safe_load(existing) if (existing or "").strip() else None
+    if parsed and declared is not None and len(parsed) != len(declared):
+        raise ApiError(
+            f"the rulebook now declares {len(declared)} source(s) but the mapping has "
+            f"{len(parsed)} row(s). Refreshing the hash cannot be correct across a change to "
+            "the sources block: map the event streams to the new sources once on the "
+            "activation in the UI, then this script can maintain it again."
+        )
+    if parsed and declared is not None:
+        named = {n for n in declared if n}
+        mapped = {str(row.get("source_name")) for row in parsed}
+        missing = named - mapped
+        if missing:
+            raise ApiError(
+                f"the rulebook declares named source(s) {sorted(missing)} that the mapping does "
+                "not reference. Map them once on the activation in the UI, then re-run."
+            )
     if parsed:
         rows = [
             {
@@ -486,12 +530,29 @@ def probe(gateway: str, uuid: str, token: str, label: str, verify: bool = True) 
         return exc.code
 
 
+def probe_conclusive(log_level: str) -> bool:
+    """Whether a non-matching probe can be confirmed from the log at this log level.
+
+    Measured 2026-10-09: the ``[received event]`` block that this check looks for is emitted at
+    **debug** level only. On an activation logging at ``info`` the event arrives and is handled
+    normally and nothing is written, so searching the log returns nothing and the check would
+    report a failure that is purely an artifact of an unrelated setting.
+
+    That happened: two healthy activations were reported as not routing, and a matching event
+    then launched their job templates within ten seconds. A check that cannot distinguish
+    "did not arrive" from "cannot tell" has to say so rather than pick the alarming answer.
+    """
+    return log_level.strip().lower() == "debug"
+
+
 def probe_arrived(aap: Aap, act_id: int, label: str) -> bool:
     """True if ``label`` appears in any recent instance log for this activation.
 
+    Only meaningful when :func:`probe_conclusive` is true for the activation's log level.
+
     An ``HTTP 200`` from the event stream is not evidence of delivery -- the stream's counter
     rises even for a rejected token, and even when no activation is listening at all. The
-    activation's own log is the only place delivery can be confirmed.
+    activation's own log is the only place a non-matching event's delivery can be confirmed.
     """
     instances = aap.get(f"/api/eda/v1/activations/{act_id}/instances/").get("results", [])
     for inst in instances[:3]:
@@ -587,7 +648,18 @@ def main() -> int:
     if rulebook_id != held_rulebook_id:
         print(f"  NOTE rulebook row changed: {held_rulebook_id} -> {rulebook_id}; will repoint")
     target = rulebook_hash(aap, rulebook_id)
-    desired = build_mappings(original_mappings, act.get("event_streams") or [], target)
+    declared = declared_sources(aap, rulebook_id)
+    print(f"  rulebook declares {len(declared)} source(s): "
+          f"{[n or '(unnamed)' for n in declared]}")
+    try:
+        desired = build_mappings(
+            original_mappings, act.get("event_streams") or [], target, declared
+        )
+    except ApiError as exc:
+        # Refusing is the point: see build_mappings for why a changed sources block
+        # cannot be maintained by refreshing the hash.
+        print(f"REFUSING: {exc}", file=sys.stderr)
+        return 2
 
     mapping_current = same_mapping(desired, original_mappings)
     clean = mapping_current and rulebook_id == held_rulebook_id and not act.get("warnings")
@@ -666,10 +738,18 @@ def main() -> int:
             label = f"apply-{int(time.time())}"
             code = probe(args.gateway, uuid, stream_token, label, verify=not args.insecure)
             print(f"  probe POST -> HTTP {code}")
-            time.sleep(15)
-            arrived = probe_arrived(aap, act_id, label)
-            print(f"  probe routed to the activation: {arrived}")
-            ok = ok and arrived
+            level = str(after.get("log_level") or "")
+            if not probe_conclusive(level):
+                # Do not fail the run on a check that cannot return an answer here.
+                print(f"  probe: INCONCLUSIVE - this activation logs at {level!r} and a "
+                      "non-matching event is only logged at 'debug'.")
+                print("  To confirm routing either set the activation's log level to debug, "
+                      "or send a matching event and watch for the job template launching.")
+            else:
+                time.sleep(15)
+                arrived = probe_arrived(aap, act_id, label)
+                print(f"  probe routed to the activation: {arrived}")
+                ok = ok and arrived
 
     print("OK" if ok else "FAILED")
     return 0 if ok else 1
