@@ -21,11 +21,6 @@
     - ansible.eda.webhook:
         host: 0.0.0.0
         port: 5000
-    # TEMPORARY - added only to measure what a changed sources block does to an
-    # existing source mapping. Remove with the branch that introduced it.
-    - ansible.eda.webhook:
-        host: 0.0.0.0
-        port: 5001
 
   rules:
     - name: Launch Team C incident handler

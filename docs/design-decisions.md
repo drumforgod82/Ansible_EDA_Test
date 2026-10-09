@@ -293,7 +293,7 @@ activation's `source_mappings`. `scripts/verify_team.py` does this comparison fo
 The paragraphs above describe the hash correctly. The *consequence* needed narrowing, because a real
 rulebook edit was pushed, synced and restarted end to end to find out. A comment-only change was
 used, so the rulebook's **sources were not altered** — that limit matters, and
-[§2.2](#22-what-was-not-tested) says why.
+[§2.2](#22-a-change-to-the-sources-block-is-the-other-case--measured-2026-10-09) says why.
 
 What happened, in order:
 
@@ -326,15 +326,46 @@ nothing. So a genuinely stale hash does stop the activation — it fails closed 
 than misrouting quietly. What changed is that an ordinary edit no longer produces that state,
 because step 1 above fixes the hash for you.
 
-### 2.2 What was not tested
+### 2.2 A change to the `sources:` block is the other case — measured 2026-10-09
 
-The change used above was **a comment only**, so the rulebook's `sources:` block was untouched and
-the existing `__SOURCE_1` mapping stayed meaningful.
+The six results above all used a **comment-only** edit, so the rulebook's `sources:` block was
+untouched. A second experiment added a second source to a rulebook and synced it, and the platform
+behaves **completely differently**. This is the case the original re-attach advice was describing,
+and for it that advice is exactly right.
 
-A rulebook edit that **adds, removes or renames a source** is a different case and was not
-measured. There the source-to-stream binding itself — not just the hash — may genuinely need
-rebuilding, and the re-attach advice may hold exactly as originally written. Treat a change to a
-`sources:` block as requiring the manual re-attach until somebody measures it.
+| | Sources unchanged (comments, rules) | Sources added, removed or renamed |
+|---|---|---|
+| Does the sync re-pin `rulebook_hash`? | **Yes, by itself** | **No — the old hash is left in place** |
+| Is the warning shown? | Yes, advisory only | Yes, and it means it |
+| Does a plain restart work? | **Yes**, loads the new rulebook | **No** — `enable` returns `HTTP 400` and the activation goes to `error` |
+| Is re-attaching the stream required? | No, it only clears the flag | **Yes, mandatory** |
+
+The refusal quotes the error this page documented all along, reached at last:
+
+```
+HTTP 400 {"errors":"{'source_mappings': 'Rulebook has changed since the sources were mapped.
+                     Please reattach event streams'}"}
+```
+
+So the platform re-pins the hash only when it can still trust the mapping. Change the sources and
+it declines to guess — which is the right behaviour, and makes the warning meaningful here rather
+than advisory.
+
+> 🔴 **The hash is the only thing checked, not whether every source is mapped.** After the sources
+> changed, writing the *new* hash into the mapping — still with one row, for a rulebook now
+> declaring two sources — was accepted and the activation started normally. The second source was
+> simply never mapped and would never receive an event, with nothing reporting a problem. That is
+> why `scripts/eda_apply_rulebook_change.py` compares the rulebook's declared sources against the
+> mapping rows and **refuses** rather than refreshing the hash: refreshing it would produce a
+> healthy-looking activation with a silently dead source.
+
+> ℹ️ **Separately from the hash, every restart loses the events that arrive during it.** That is a
+> different problem with its own page:
+> [Handling the window where events are lost](change-window-reconcile.md).
+
+**What to do after changing a `sources:` block.** Re-map the event streams once by hand on the
+activation (the gear icon beside *Event streams*), which rebuilds the binding and re-pins the hash.
+After that the scripted path maintains it again.
 
 > ⚠️ **Automation Execution and Automation Decisions sync independently**, even pointing at the same
 > Git URL. So the controller project and the EDA project can sit at two *different* revisions of the

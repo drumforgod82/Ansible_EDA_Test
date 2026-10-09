@@ -134,6 +134,7 @@ These are not stages. Read them when the question comes up.
 | [Glossary](docs/glossary.md) | Every term and acronym, in one place |
 | [Rulebook anatomy](docs/rulebook-anatomy.md) | What a rulebook is, a real one annotated line by line, and the five values you change per team. **Read before [08 §2.2](docs/08-routine-ops.md)** |
 | [Design decisions](docs/design-decisions.md) | Why one stream per team, the **per-team vs shared token choice** and its object-count and rotation trade-offs, the rejected Decision Table, and the open questions |
+| [Handling the window where events are lost](docs/change-window-reconcile.md) | Why a restart silently discards the events that arrive during it, that unplanned restarts are the more frequent case, and the proposed reconciliation design |
 | [Adding a record type](docs/adding-record-types.md) | The long-form guide for adding SCTASK and Problem to existing teams |
 | [Git workflow](docs/git-workflow.md) | **Read before your second pull request.** The squash-merge trap and the habit that prevents it |
 | [Action scripts](docs/scripts/) | Canonical copies of all six ServiceNow step scripts, with their step sys_ids and declared variable names |
@@ -203,6 +204,7 @@ one needs, and which to run when. If nothing is installed on your computer yet, 
 │   ├── glossary.md                              # every term
 │   ├── rulebook-anatomy.md                      # a rulebook, annotated
 │   ├── design-decisions.md                      # why it is shaped this way
+│   ├── change-window-reconcile.md               # the events a restart loses, and what to do
 │   ├── adding-record-types.md                   # SCTASK and Problem, long form
 │   ├── git-workflow.md
 │   ├── aap-platform-troubleshooting.md          # cluster failures under AAP, self-hosted only

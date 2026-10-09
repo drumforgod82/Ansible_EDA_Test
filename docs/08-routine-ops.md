@@ -758,7 +758,14 @@ Or this, which means there is work to do:
 >   --activation team-c-incidents --sync --apply --probe
 > ```
 >
-> Expected extra output: `probe routed to the activation: True`. On this lab the shared token lives
+> Expected extra output: `probe routed to the activation: True`, **or**
+> `probe: INCONCLUSIVE` — which is not a failure. The test event is deliberately non-matching, and
+> a non-matching event is only written to the log at **debug** level, so on an activation logging at
+> `info` the check cannot tell "did not arrive" from "cannot see it". Measured: two healthy
+> activations logging at `info` reported `False` before this was fixed, and a matching event then
+> launched their job templates within ten seconds. To get a definitive answer, either set the
+> activation's log level to debug, or send a real matching event and watch for the job template
+> launching. On this lab the shared token lives
 > in the `sandbox-eda-team-a` Keychain item — see the warning in
 > [§4.1](#41-shared-token-rotation--the-path-this-lab-is-on-since-2026-10-08) about the other
 > per-team items being stale.
@@ -782,6 +789,13 @@ actually marks is "this rulebook changed under a running activation". Two conseq
 - **Restarting alone clears the problem but not the flag.** Measured: a plain stop and start loaded
   the new rulebook — the new instance reported the new Git revision — while the flag stayed set.
   Only rewriting `source_mappings` clears it, which is what this script does.
+
+> 🔴 **This applies to an edit that leaves the `sources:` block alone** — a comment or a rule
+> change. If you **add, remove or rename a source**, everything above inverts: the sync does *not*
+> re-pin the hash, a restart is **refused** with `HTTP 400` and the activation goes to `error`, and
+> re-mapping the event stream by hand is genuinely required. The script detects that case and
+> refuses rather than making it worse. Full measurements in
+> [design decisions §2.2](design-decisions.md#22-a-change-to-the-sources-block-is-the-other-case--measured-2026-10-09).
 
 > ⚠️ **Only the activation's own detail page reports the flag.** The list of all activations returns
 > an empty value for it and does not work it out. So a check written against the list will report a
@@ -813,6 +827,14 @@ A stopped activation is not listening. So an event posted during the window:
 > EDA Rule Engine persistence. This uses the Postgres DB Credential."* It gives the **rule engine** a
 > database for its own state. The loss happens before the rule engine is involved, where nothing is
 > listening at all, so there is nothing for it to preserve.
+
+> 🔴 **The window is not only when you plan it.** Measured 2026-10-09: these three
+> activations have restarted 59 times between them, and 5 of one activation's last 20 instances
+> ended in unplanned failures — readiness timeouts, liveness timeouts and a missing container. One
+> image-pull failure that day stretched a planned 37-second window to 111 seconds. So a procedure
+> that only covers planned changes misses the more frequent case.
+> [Handling the window where events are lost](change-window-reconcile.md) sets out what to build
+> about it.
 
 What you can do about it, in order of preference:
 
@@ -868,5 +890,5 @@ first used and in the [Glossary](glossary.md).
 **What §6 does not cover, stated rather than implied.** Every measurement behind it used a
 **comment-only** rulebook change, so the rulebook's `sources:` block was never altered. A change
 that adds, removes or renames a source may genuinely need the manual re-attach, and
-[design decisions §2.2](design-decisions.md#22-what-was-not-tested) says so in the same terms rather
+[design decisions §2.2](design-decisions.md#22-a-change-to-the-sources-block-is-the-other-case--measured-2026-10-09) says so in the same terms rather
 than leaving the reader to assume the scripted path always applies.

@@ -45,12 +45,23 @@ block was untouched; see "What is not covered" below.
   the activation then refuses to start: ``enable`` returns ``HTTP 400`` and it goes to ``error``.
   Loud, not silent -- and this script rolls the mapping back if it happens.
 
-What is not covered
--------------------
-A rulebook edit that **adds, removes or renames a source** was not measured. There the
-source-to-stream binding itself, not just the hash, may need rebuilding, and the manual re-attach
-may be genuinely required. Treat a change to a ``sources:`` block as needing the UI until somebody
-measures it.
+A change to the sources block -- the other case, measured 2026-10-09
+-------------------------------------------------------------------
+Everything above holds for an edit that leaves ``sources:`` alone. Add, remove or rename a source
+and the platform behaves the opposite way:
+
+* **The sync does not re-pin the hash.** The old hash stays, so the mapping really is stale.
+* **A restart is refused**: ``enable`` returns ``HTTP 400`` with
+  ``{'source_mappings': 'Rulebook has changed since the sources were mapped. Please reattach event
+  streams'}`` and the activation goes to ``error``.
+* **Re-mapping the event stream by hand is mandatory**, exactly as the vendor documentation says.
+
+So the platform re-pins the hash only while it can still trust the mapping, and declines to guess
+once the sources move. This script therefore refuses that case rather than refreshing the hash --
+see ``build_mappings`` -- because refreshing it is *accepted*: writing the new hash with one
+mapping row for a two-source rulebook started the activation normally and left the second source
+permanently unmapped, with nothing reporting a fault. Only the hash is validated, never whether
+every source is mapped.
 
 What it does NOT fix
 --------------------
