@@ -828,6 +828,14 @@ A stopped activation is not listening. So an event posted during the window:
 > database for its own state. The loss happens before the rule engine is involved, where nothing is
 > listening at all, so there is nothing for it to preserve.
 
+> 🔴 **The window is not only when you plan it.** Measured 2026-10-09: these three
+> activations have restarted 59 times between them, and 5 of one activation's last 20 instances
+> ended in unplanned failures — readiness timeouts, liveness timeouts and a missing container. One
+> image-pull failure that day stretched a planned 37-second window to 111 seconds. So a procedure
+> that only covers planned changes misses the more frequent case.
+> [Handling the window where events are lost](change-window-reconcile.md) sets out what to build
+> about it.
+
 What you can do about it, in order of preference:
 
 - **Pause the sender** for the length of the window, and let the records queue in ServiceNow.

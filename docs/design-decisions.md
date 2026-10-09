@@ -359,6 +359,10 @@ than advisory.
 > mapping rows and **refuses** rather than refreshing the hash: refreshing it would produce a
 > healthy-looking activation with a silently dead source.
 
+> ℹ️ **Separately from the hash, every restart loses the events that arrive during it.** That is a
+> different problem with its own page:
+> [Handling the window where events are lost](change-window-reconcile.md).
+
 **What to do after changing a `sources:` block.** Re-map the event streams once by hand on the
 activation (the gear icon beside *Event streams*), which rebuilds the binding and re-pins the hash.
 After that the scripted path maintains it again.
