@@ -94,11 +94,15 @@ image-pull failure.
 
 ## 4. What to build
 
-**Proposed, not built.** Four pieces, in dependency order.
+**Proposed, not built.** Four pieces, in dependency order. The question that used to block all of
+them — whether running the handler twice is safe — is now measured, in
+[§4.1](#41-is-it-safe-to-run-twice--measured-2026-10-09).
 
-1. **Make the marker explicit.** Reconciliation needs to ask "was this record automated?" and get a
-   reliable answer. Today the only marker is a work note whose text the playbook writes. Measured
-   format, from a real run on 2026-10-09:
+1. **Make the marker explicit, and check it before re-sending.** Reconciliation needs to ask "was
+   this record automated?" and get a reliable answer — and [§4.1](#41-is-it-safe-to-run-twice--measured-2026-10-09)
+   shows it must also *act* on that answer, because a second run adds a duplicate work note and runs
+   the remediation again. Today the only marker is a work note whose text the playbook writes.
+   Measured format, from a real run on 2026-10-09:
 
    ```
    2026-10-09 10:48:35 - System Administrator (Work notes)
@@ -123,13 +127,49 @@ image-pull failure.
    A scheduled job in ServiceNow is the smaller build, because the query and the outbound post both
    already exist there.
 
-4. **Make re-processing safe.** Reconciliation re-sends events, so the playbook may run twice for one
-   record. It must be harmless the second time.
+4. **Keep re-processing safe.** Reconciliation re-sends events, so the handler may run twice for one
+   record. [§4.1](#41-is-it-safe-to-run-twice--measured-2026-10-09) measures what that does today: the
+   ServiceNow write-back survives it, the remediation is the part to watch.
 
-> 🔴 **Step 4 is an open question, not a detail, and it should be answered before step 3 is built.**
-> The incident handler closes the incident it processed. What a second run does to an
-> already-closed incident has **not been tested**, and if it reopens it, writes a duplicate note, or
-> fails loudly, reconciliation would be worse than the problem it solves. Test that first.
+### 4.1 Is it safe to run twice? — measured 2026-10-09
+
+This was the open question blocking the rest of the design. It was tested by creating an incident,
+sending its event, letting the handler close it, and then **sending the identical event again**.
+
+| | After run 1 | After run 2 |
+|---|---|---|
+| Job result | `successful` | **`successful`** — no failure |
+| `state` | `Closed` | **`Closed`** — unchanged |
+| `close_code` | `Solution provided` | **unchanged** |
+| `reopen_count` | `0` | **`0`** — it does **not** reopen |
+| `sys_mod_count` | 2 | 3 |
+| Automation work notes | 1 | **2 — a duplicate** |
+
+**The good half: nothing breaks.** A second run does not fail, does not reopen the incident, and
+does not corrupt its state or close code. So reconciliation cannot damage records that were already
+handled, which is what the design needed to know before being built.
+
+**The other half: it is additive, not idempotent.** Each run appends another work note:
+
+```
+2026-10-09 11:43:38 - System Administrator (Work notes)
+Ansible Automation completed at 2026-10-09 13:43:37 CDT
+
+2026-10-09 11:43:10 - System Administrator (Work notes)
+Ansible Automation completed at 2026-10-09 13:43:09 CDT
+```
+
+That is why step 1 above is a **gate** and not merely a query: reconciliation has to skip records
+that already carry the marker, or a job running on a schedule will keep adding notes to records it
+already handled.
+
+> 🔴 **This tested the ServiceNow write-back, not a real remediation.** This lab's remediation tasks
+> are debug messages — in the second run, *Execute disk cleanup remediation* was skipped and
+> *Execute generic remediation* only printed a message. So the measurement says re-sending an event
+> is safe **for this handler as written**. A handler whose remediation actually changes a machine
+> must be checked for repeat-safety on its own terms before reconciliation is pointed at it. The
+> handler has no guard against re-processing of any kind, so that safety has to come from the gate in
+> step 1.
 
 ---
 
@@ -159,8 +199,9 @@ Reconciliation is needed either way. What changes is how much it has to clean up
 ## Self-check
 
 **Did I skip any prerequisite steps?** No. The three terms the page depends on are defined in §1
-before use, and the dependency order in §4 is explicit — step 4 is marked as blocking step 3,
-because building reconciliation on an unsafe re-run would make things worse.
+before use, and the dependency order in §4 is explicit. The re-run question that used to block the
+build is now measured in §4.1, and the result moved work rather than removing it: step 1's marker is
+now a required gate rather than a convenience, because re-running is non-destructive but additive.
 
 **Is every command copy-paste ready with context?** There are no commands to run here; this page is
 a measurement summary and a proposal. The one code-shaped block is the measured work-note format,
@@ -173,6 +214,8 @@ response can mean the event was thrown away. That is given its own paragraph wit
 stream counter and the `running` status — are called out explicitly, because both would otherwise
 reassure a reader who checked them.
 
-**What is measured and what is proposed** is marked per claim: §1 and §2 are measured and dated,
-§3's recommendation is reasoning from those measurements, and §4 is a proposal with one untested
-assumption flagged in red.
+**What is measured and what is proposed** is marked per claim: §1, §2 and §4.1 are measured and
+dated, §3's recommendation is reasoning from those measurements, and §4's four pieces are a proposal.
+One scope limit is flagged in red rather than left implicit: §4.1 exercised the ServiceNow
+write-back, not a remediation that changes a machine, because this lab's remediation tasks are debug
+messages.
