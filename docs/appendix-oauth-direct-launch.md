@@ -214,6 +214,8 @@ _Connection & Credential Alias for Ansible_
 
 _Create New Connection & Credential → Create and Get OAuth Token_
 
+![Application Registry Screenshot](images/Application_registry_OAuth.png)
+
 
 ## A.3 Create the REST Message
 
